@@ -7,8 +7,34 @@ import { fetcher } from '@/lib/graphql';
 import { Loader2, AlertCircle, CheckCircle2, XCircle, Clock, Activity } from 'lucide-react';
 import Link from 'next/link';
 
+import { useState } from 'react';
+
 const GET_GLOBAL_RUNS = `
-  query GetGlobalRuns($orgId: uuid!) {
+  query GetGlobalRuns($orgId: uuid!, $status: String) {
+    workflow_runs(
+      where: {
+        workflow: {org_id: {_eq: $orgId}},
+        _and: [
+          {status: {_eq: $status}}
+        ]
+      }, 
+      order_by: {created_at: desc}, 
+      limit: 50
+    ) {
+      id
+      status
+      started_at
+      completed_at
+      workflow {
+        id
+        name
+      }
+    }
+  }
+`;
+
+const GET_GLOBAL_RUNS_ALL = `
+  query GetGlobalRunsAll($orgId: uuid!) {
     workflow_runs(
       where: {workflow: {org_id: {_eq: $orgId}}}, 
       order_by: {created_at: desc}, 
@@ -29,13 +55,17 @@ const GET_GLOBAL_RUNS = `
 export default function GlobalRunsPage() {
   const { activeOrg, isLoading: isOrgLoading } = useOrganization();
   const orgId = activeOrg?.id;
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const queryToUse = statusFilter === 'all' ? GET_GLOBAL_RUNS_ALL : GET_GLOBAL_RUNS;
+  const variables = statusFilter === 'all' ? { orgId } : { orgId, status: statusFilter };
 
   const { data, error, isLoading } = useSWR(
-    orgId ? [GET_GLOBAL_RUNS, { orgId }] : null,
-    ([query, variables]) => fetcher(query, variables)
+    orgId ? [queryToUse, variables] : null,
+    ([query, vars]) => fetcher(query, vars)
   );
 
-  if (isOrgLoading || (isLoading && !error)) {
+  if (isOrgLoading || (isLoading && !error && !data)) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
@@ -80,12 +110,26 @@ export default function GlobalRunsPage() {
             Recent workflow executions across all workflows in {activeOrg.name}.
           </p>
         </div>
+        <div className="mt-4 sm:mt-0">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm sm:leading-6"
+          >
+            <option value="all">All Statuses</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="running">Running</option>
+            <option value="paused">Paused</option>
+            <option value="pending">Pending</option>
+          </select>
+        </div>
       </div>
 
       <div className="bg-white shadow sm:rounded-lg overflow-hidden">
         <ul className="divide-y divide-gray-200">
           {runs.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-gray-500">No workflow runs found in this organization.</li>
+            <li className="px-4 py-8 text-center text-sm text-gray-500">No workflow runs found matching this status.</li>
           ) : (
             runs.map((run: any) => (
               <li key={run.id} className="p-4 hover:bg-gray-50 transition-colors">

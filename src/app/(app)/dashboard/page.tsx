@@ -14,7 +14,12 @@ const GET_DASHBOARD_DATA = `
         count
       }
     }
-    workflow_runs_aggregate(where: {workflow: {org_id: {_eq: $orgId}}}) {
+    completed_runs: workflow_runs_aggregate(where: {workflow: {org_id: {_eq: $orgId}}, status: {_eq: "completed"}}) {
+      aggregate {
+        count
+      }
+    }
+    active_runs: workflow_runs_aggregate(where: {workflow: {org_id: {_eq: $orgId}}, status: {_in: ["running", "paused", "pending"]}}) {
       aggregate {
         count
       }
@@ -97,7 +102,8 @@ export default function DashboardPage() {
   }
 
   const workflowCount = data?.workflows_aggregate?.aggregate?.count || 0;
-  const runCount = data?.workflow_runs_aggregate?.aggregate?.count || 0;
+  const completedCount = data?.completed_runs?.aggregate?.count || 0;
+  const activeCount = data?.active_runs?.aggregate?.count || 0;
   const failedCount = data?.failed_runs?.aggregate?.count || 0;
   const recentRuns = data?.workflow_runs || [];
   const recentNotifications = data?.notifications || [];
@@ -109,7 +115,7 @@ export default function DashboardPage() {
         <p className="text-sm text-gray-500">Overview for {activeOrg.name}</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="overflow-hidden rounded-lg bg-white shadow">
           <div className="p-5">
             <div className="flex items-center">
@@ -143,9 +149,9 @@ export default function DashboardPage() {
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
-                  <dt className="truncate text-sm font-medium text-gray-500">Total Executions</dt>
+                  <dt className="truncate text-sm font-medium text-gray-500">Completed</dt>
                   <dd>
-                    <div className="text-lg font-medium text-gray-900">{runCount}</div>
+                    <div className="text-lg font-medium text-gray-900">{completedCount}</div>
                   </dd>
                 </dl>
               </div>
@@ -155,6 +161,31 @@ export default function DashboardPage() {
             <div className="text-sm">
               <Link href="/runs" className="font-medium text-indigo-700 hover:text-indigo-900">
                 View all runs
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-lg bg-white shadow">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <Clock className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Active / Paused</dt>
+                  <dd>
+                    <div className="text-lg font-medium text-gray-900">{activeCount}</div>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+          <div className="bg-gray-50 px-5 py-3">
+            <div className="text-sm">
+              <Link href="/runs" className="font-medium text-indigo-700 hover:text-indigo-900">
+                View active runs
               </Link>
             </div>
           </div>
