@@ -14,6 +14,16 @@ const GET_DASHBOARD_DATA = `
         count
       }
     }
+    workflow_runs_aggregate(where: {workflow: {org_id: {_eq: $orgId}}}) {
+      aggregate {
+        count
+      }
+    }
+    failed_runs: workflow_runs_aggregate(where: {workflow: {org_id: {_eq: $orgId}}, status: {_eq: "failed"}}) {
+      aggregate {
+        count
+      }
+    }
     workflows(where: {org_id: {_eq: $orgId}}, order_by: {created_at: desc}, limit: 5) {
       id
       name
@@ -26,6 +36,17 @@ const GET_DASHBOARD_DATA = `
       started_at
       workflow {
         name
+      }
+    }
+    notifications(where: {org_id: {_eq: $orgId}}, order_by: {created_at: desc}, limit: 5) {
+      id
+      title
+      message
+      created_at
+      workflow_run {
+        workflow {
+          name
+        }
       }
     }
   }
@@ -76,8 +97,10 @@ export default function DashboardPage() {
   }
 
   const workflowCount = data?.workflows_aggregate?.aggregate?.count || 0;
-  const recentWorkflows = data?.workflows || [];
+  const runCount = data?.workflow_runs_aggregate?.aggregate?.count || 0;
+  const failedCount = data?.failed_runs?.aggregate?.count || 0;
   const recentRuns = data?.workflow_runs || [];
+  const recentNotifications = data?.notifications || [];
 
   return (
     <div className="space-y-6">
@@ -91,7 +114,7 @@ export default function DashboardPage() {
           <div className="p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <LayoutTemplate className="h-6 w-6 text-gray-400" aria-hidden="true" />
+                <LayoutTemplate className="h-6 w-6 text-indigo-400" aria-hidden="true" />
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
@@ -106,7 +129,57 @@ export default function DashboardPage() {
           <div className="bg-gray-50 px-5 py-3">
             <div className="text-sm">
               <Link href="/workflows" className="font-medium text-indigo-700 hover:text-indigo-900">
-                View all
+                View workflows
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-lg bg-white shadow">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <Activity className="h-6 w-6 text-green-500" aria-hidden="true" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Total Executions</dt>
+                  <dd>
+                    <div className="text-lg font-medium text-gray-900">{runCount}</div>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+          <div className="bg-gray-50 px-5 py-3">
+            <div className="text-sm">
+              <Link href="/runs" className="font-medium text-indigo-700 hover:text-indigo-900">
+                View all runs
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-lg bg-white shadow">
+          <div className="p-5">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <AlertCircle className="h-6 w-6 text-red-400" aria-hidden="true" />
+              </div>
+              <div className="ml-5 w-0 flex-1">
+                <dl>
+                  <dt className="truncate text-sm font-medium text-gray-500">Failed Executions</dt>
+                  <dd>
+                    <div className="text-lg font-medium text-gray-900">{failedCount}</div>
+                  </dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+          <div className="bg-gray-50 px-5 py-3">
+            <div className="text-sm">
+              <Link href="/runs" className="font-medium text-indigo-700 hover:text-indigo-900">
+                Review failures
               </Link>
             </div>
           </div>
@@ -114,43 +187,13 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Recent Workflows */}
-        <div className="overflow-hidden rounded-lg bg-white shadow">
-          <div className="border-b border-gray-200 bg-white px-4 py-5 sm:px-6">
-            <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Workflows</h3>
-          </div>
-          <ul role="list" className="divide-y divide-gray-200">
-            {recentWorkflows.length === 0 ? (
-              <li className="px-4 py-5 text-sm text-gray-500 text-center">No workflows found.</li>
-            ) : (
-              recentWorkflows.map((workflow: any) => (
-                <li key={workflow.id} className="px-4 py-4 sm:px-6 hover:bg-gray-50">
-                  <Link href={`/workflows/${workflow.id}`} className="flex items-center justify-between">
-                    <div className="truncate">
-                      <p className="truncate font-medium text-indigo-600">{workflow.name}</p>
-                      <p className="mt-1 flex items-center text-sm text-gray-500">
-                        <Clock className="mr-1.5 h-4 w-4 flex-shrink-0 text-gray-400" />
-                        {new Date(workflow.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div className="ml-2 flex flex-shrink-0">
-                      <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
-                        workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-gray-50 text-gray-600 ring-gray-500/10'
-                      }`}>
-                        {workflow.status}
-                      </span>
-                    </div>
-                  </Link>
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
-
         {/* Recent Runs */}
         <div className="overflow-hidden rounded-lg bg-white shadow">
-          <div className="border-b border-gray-200 bg-white px-4 py-5 sm:px-6">
-            <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Execution Runs</h3>
+          <div className="border-b border-gray-200 bg-white px-4 py-5 sm:flex sm:items-center sm:justify-between sm:px-6">
+            <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Executions</h3>
+            <div className="mt-3 sm:ml-4 sm:mt-0">
+              <Link href="/runs" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">View all</Link>
+            </div>
           </div>
           <ul role="list" className="divide-y divide-gray-200">
             {recentRuns.length === 0 ? (
@@ -168,13 +211,46 @@ export default function DashboardPage() {
                     </div>
                     <div className="ml-2 flex flex-shrink-0">
                       <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
-                        run.status === 'success' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
+                        run.status === 'completed' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
                         run.status === 'failed' ? 'bg-red-50 text-red-700 ring-red-600/10' :
                         'bg-yellow-50 text-yellow-800 ring-yellow-600/20'
                       }`}>
                         {run.status}
                       </span>
                     </div>
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+
+        {/* Recent Notifications */}
+        <div className="overflow-hidden rounded-lg bg-white shadow">
+          <div className="border-b border-gray-200 bg-white px-4 py-5 sm:flex sm:items-center sm:justify-between sm:px-6">
+            <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Notifications</h3>
+            <div className="mt-3 sm:ml-4 sm:mt-0">
+              <Link href="/notifications" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">View all</Link>
+            </div>
+          </div>
+          <ul role="list" className="divide-y divide-gray-200">
+            {recentNotifications.length === 0 ? (
+              <li className="px-4 py-5 text-sm text-gray-500 text-center">No notifications found.</li>
+            ) : (
+              recentNotifications.map((notif: any) => (
+                <li key={notif.id} className="px-4 py-4 sm:px-6 hover:bg-gray-50">
+                  <div className="flex flex-col">
+                    <div className="flex justify-between items-start">
+                      <p className="font-medium text-gray-900 text-sm">{notif.title}</p>
+                      <span className="text-xs text-gray-500 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(notif.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-600 line-clamp-2">{notif.message}</p>
+                    {notif.workflow_run?.workflow && (
+                      <p className="mt-2 text-xs text-indigo-600 font-medium">Source: {notif.workflow_run.workflow.name}</p>
+                    )}
                   </div>
                 </li>
               ))

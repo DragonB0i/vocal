@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, List, Play } from 'lucide-react';
+import { Home, List, Play, Activity, Bell } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Workflows', href: '/workflows', icon: List },
+  { name: 'Global Runs', href: '/runs', icon: Activity },
+  { name: 'Notifications', href: '/notifications', icon: Bell },
 ];
 
 export function Sidebar() {
