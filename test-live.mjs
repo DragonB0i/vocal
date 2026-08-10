@@ -22,25 +22,42 @@ async function main() {
   const sessions = {};
   
   // 1. Register & Login Users
-  console.log("1. Registering test users...");
+  console.log("1. Authenticating test users...");
   for (const u of users) {
-    const { data: session, error } = await nhost.auth.signUpEmailPassword({
-      email: u.email,
-      password: u.password
-    });
+    let session, error;
+    
+    // Try sign in first
+    try {
+      const res = await nhost.auth.signInEmailPassword({ email: u.email, password: u.password });
+      session = res.session;
+      error = res.error;
+    } catch (err) {
+      error = err;
+    }
+
+    if (error && (error.message.toLowerCase().includes('invalid') || error.message.toLowerCase().includes('incorrect'))) {
+      console.log(` - User ${u.email} not found or incorrect password. Attempting sign up...`);
+      try {
+        const signupRes = await nhost.auth.signUpEmailPassword({ email: u.email, password: u.password });
+        session = signupRes.data; // Note: signUpEmailPassword returns { data: session } in some SDK versions, or { session }
+        error = signupRes.error;
+      } catch (err) {
+        error = err;
+      }
+    }
     
     if (error) {
-      console.error(`Failed to register ${u.email}:`, error);
+      console.error(`Failed to authenticate ${u.email}:`, error);
       process.exit(1);
     }
     
     if (!session) {
-      console.error(`No session returned for ${u.email}. Are you sure "Require Email Verification" is turned OFF in Nhost Settings -> Sign-In Methods?`);
+      console.error(`No session returned for ${u.email}. Verification is required!`);
       process.exit(1);
     }
     
     sessions[u.email] = session;
-    console.log(` - Registered ${u.email} (${session.user.id})`);
+    console.log(` - Authenticated ${u.email} (${session.user.id})`);
   }
 
   const ownerA = sessions[users[0].email];
