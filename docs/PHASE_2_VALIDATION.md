@@ -1,43 +1,22 @@
 # Phase 2 Validation Report
 
-## 1. Deployment Status
-- **GitHub**: Pushed to `DragonB0i/vocal` successfully.
-- **Nhost Cloud**: Deployment confirmed active on `luttcgrgbhoixswtzfxv` / `ap-south-1`.
+## Successfully Validated
 
-## 2. Schema Validation
-- All Phase 1 tables exist and match `up.sql`: `organizations`, `org_members`, `workflows`, `workflow_steps`, `workflow_triggers`, `workflow_runs`, `step_runs`, `notifications`, `audit_logs`, `custom_app_data`.
-- Primary keys, foreign keys, constraints, and required columns are correctly verified against the repository definition.
+- **Schema/Migration Correctness:** All Phase 1 tables exist and match `up.sql` (`organizations`, `org_members`, `workflows`, `workflow_steps`, `workflow_triggers`, `workflow_runs`, `step_runs`, `notifications`, `audit_logs`, `custom_app_data`).
+- **Hasura Metadata Structure:** Relationships and object mapping accurately reflect the PostgreSQL schema.
+- **Relationship Consistency:** Foreign key hierarchies correctly flow from `organization -> workflows -> workflow_steps / workflow_runs -> step_runs`.
+- **Permission Definitions:** Granular select/insert/update/delete permissions have been statically verified.
+- **Organization Isolation Rules (Metadata Level):** Isolation correctly relies exclusively on `X-Hasura-User-Id` and `org_members` mapping.
+- **RBAC Definitions:** Owner, Editor, and Viewer limitations are robustly defined using metadata `_and`/`_or` role checks.
+- **Workflow Execution-State Restrictions:** `workflow_runs` and `step_runs` are correctly designated as read-only for normal application users.
+- **Organization Reassignment Protection:** `workflows.org_id` is successfully omitted from permitted update columns.
+- **Seed-Function Security Audit:** Both `seed-org.ts` and `add-member.ts` strictly require valid Authorization headers and enforce ownership constraints before modifying data.
+- **GitHub → Nhost Cloud Deployment:** The local repository successfully deployed to the remote Nhost backend.
 
-## 3. Relationship Validation
-- `organization -> org_members`, `organization -> workflows`, `workflow -> organization`, `workflow -> workflow_steps`, `workflow -> workflow_triggers`, `workflow -> workflow_runs`, `workflow_run -> step_runs`, `step_run -> workflow_run`, `step_run -> workflow_step` are accurately mapped in Hasura metadata and correspond directly to foreign keys in PostgreSQL.
-- The `auth.users` relationship mapping matches standard Nhost architecture.
+## Not Live-Validated
 
-## 4. Security Rules Audit
-- Organization isolation strictly enforces `X-Hasura-User-Id` mapping through `org_members`.
-- Child-table security traverses the correct hierarchical chain.
-- Workflows, steps, triggers, and runs cannot cross organizations.
-- Organization reassignment protection: `workflows.org_id` is expressly omitted from all `update_permissions`, preventing reassignment by any user.
+* **The 11 Authenticated Cross-Org/RBAC Attack Tests:** NOT EXECUTED — BLOCKED BY TEST IDENTITY VERIFICATION
+* **Positive Authenticated RBAC Tests:** NOT EXECUTED — BLOCKED BY TEST IDENTITY VERIFICATION
+* **Database State Assertions:** NOT EXECUTED — BLOCKED BY TEST IDENTITY VERIFICATION
 
-## 5. Authentication Validation
-- **Status: BLOCKED**
-- Enforced Email Verification in Nhost Cloud prevents unverified test identities from obtaining sessions.
-
-## 6. Live GraphQL Security Validation Tests
-- **Status: PENDING**
-- 11 Security Matrix Tests waiting for authenticated identities.
-
-## 7. Positive RBAC Tests
-- **Status: PENDING**
-- Tests waiting for authenticated identities.
-
-## 8. Execution-State Protection Tests
-- **Status: PENDING**
-
-## 9. Database Integrity Checks
-- **Status: PENDING**
-
-## 10. Discovered Issues & Fixes Applied
-- **Fixed:** Added serverless functions (`seed-org.ts` & `add-member.ts`) to securely seed test data without weakening the schema permissions for organizations and members.
-
-## 11. Final Phase 2 Status
-**BLOCKED** - Awaiting verified email test accounts.
+*Reason:* Nhost Cloud requires verified email identities to issue access tokens, and the required test accounts (`nickvanessa5+ownera@gmail.com`, etc.) could not all be authenticated during the deadline window. No live mutations were executed against the remote backend.
