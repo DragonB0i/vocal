@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { Request, Response } from 'express';
 import { executeGraphQL } from './_shared/runner';
+import { checkRateLimit, getAuthenticatedUserId } from './_shared/security';
 import crypto from 'crypto';
 
 export default async function handler(req: Request, res: Response) {
@@ -39,6 +40,18 @@ export default async function handler(req: Request, res: Response) {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 
+  // --- 0. RATE LIMITING ---
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(String(clientIp), 30)) {
+    return res.status(429).json({ error: 'Too Many Requests' });
+  }
+
+  // --- 1. AUTHORIZATION ---
+  const userId = await getAuthenticatedUserId(graphqlUrl, authHeader);
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized: invalid or missing user token' });
+  }
+
   try {
     // 1. Check access
     const checkAccessQuery = `
@@ -66,17 +79,6 @@ export default async function handler(req: Request, res: Response) {
     const workflow = accessData.data?.workflows_by_pk;
     if (!workflow) {
       return res.status(403).json({ error: 'Workflow not found or access denied' });
-    }
-
-    const token = authHeader.replace('Bearer ', '');
-    const payloadBase64 = token.split('.')[1];
-    if (!payloadBase64) throw new Error('Invalid token');
-    const payloadStr = Buffer.from(payloadBase64, 'base64').toString('utf8');
-    const payload = JSON.parse(payloadStr);
-    const userId = payload['https://hasura.io/jwt/claims']?.['x-hasura-user-id'];
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized: missing user ID in token' });
     }
 
     const membership = workflow.organization.org_members.find((m: any) => m.user_id === userId);

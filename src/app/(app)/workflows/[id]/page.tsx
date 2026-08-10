@@ -565,7 +565,14 @@ export default function WorkflowDetailPage() {
                            <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />}
                           <span className="ml-3 text-sm font-medium text-gray-900 capitalize">{run.status}</span>
                         </div>
-                        <span className="text-xs text-gray-500">{new Date(run.started_at).toLocaleString()}</span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(run.started_at).toLocaleString()}
+                          {run.completed_at && (
+                            <span className="ml-2 bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                              {Math.round((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s
+                            </span>
+                          )}
+                        </span>
                       </div>
                       
                       <div className="mt-3 pl-8">
@@ -574,7 +581,19 @@ export default function WorkflowDetailPage() {
                             <li key={sr.id} className="text-sm flex flex-col gap-1 border-l-2 border-gray-200 pl-3 py-1">
                               <div className="flex items-center justify-between">
                                 <span className="font-medium text-gray-700">{sr.workflow_step.name}</span>
-                                <span className={`text-xs capitalize ${sr.status === 'completed' ? 'text-green-600' : sr.status === 'failed' ? 'text-red-600' : sr.status === 'paused' ? 'text-yellow-600' : sr.status === 'cancelled' ? 'text-gray-400' : 'text-blue-600'}`}>{sr.status}</span>
+                                <div className="flex items-center gap-2">
+                                  {(sr.output?.retries > 0 || sr.error?.retries > 0) && (
+                                    <span className="text-xs text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded">
+                                      {sr.output?.retries || sr.error?.retries} retries
+                                    </span>
+                                  )}
+                                  {(sr.output?.duration_ms || sr.error?.duration_ms) && (
+                                    <span className="text-xs text-gray-500">
+                                      {Math.round((sr.output?.duration_ms || sr.error?.duration_ms) / 1000 * 10) / 10}s
+                                    </span>
+                                  )}
+                                  <span className={`text-xs capitalize ${sr.status === 'completed' ? 'text-green-600' : sr.status === 'failed' ? 'text-red-600' : sr.status === 'paused' ? 'text-yellow-600' : sr.status === 'cancelled' ? 'text-gray-400' : 'text-blue-600'}`}>{sr.status}</span>
+                                </div>
                               </div>
                               
                               {sr.status === 'paused' && sr.workflow_step.type === 'approval_gate' && !isViewer && (
@@ -591,13 +610,14 @@ export default function WorkflowDetailPage() {
                               )}
 
                               {sr.error && (
-                                <div className="mt-1 bg-red-50 text-red-700 text-xs p-2 rounded">
-                                  {JSON.stringify(sr.error)}
+                                <div className="mt-1 bg-red-50 text-red-700 text-xs p-2 rounded border border-red-100">
+                                  <span className="font-semibold block mb-1">Execution Error:</span>
+                                  {sr.error.message || JSON.stringify(sr.error)}
                                 </div>
                               )}
                               {sr.output && sr.status !== 'paused' && (
-                                <div className="mt-1 bg-gray-50 text-gray-600 text-xs p-2 rounded font-mono overflow-hidden whitespace-pre-wrap max-h-32 overflow-y-auto">
-                                  {JSON.stringify(sr.output, null, 2)}
+                                <div className="mt-1 bg-gray-50 text-gray-600 text-xs p-2 rounded font-mono overflow-hidden whitespace-pre-wrap max-h-32 overflow-y-auto border border-gray-100">
+                                  {JSON.stringify({...sr.output, duration_ms: undefined, retries: undefined}, null, 2)}
                                 </div>
                               )}
                             </li>

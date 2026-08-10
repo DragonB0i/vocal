@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { Request, Response } from 'express';
 import { runWorkflowEngine, executeGraphQL } from './_shared/runner';
+import { checkRateLimit, getAuthenticatedUserId } from './_shared/security';
 
 export default async function handleApproveStep(req: Request, res: Response) {
   if (req.method !== 'POST') {
@@ -25,7 +26,18 @@ export default async function handleApproveStep(req: Request, res: Response) {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 
+  // --- 0. RATE LIMITING ---
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(String(clientIp), 30)) {
+    return res.status(429).json({ error: 'Too Many Requests' });
+  }
+
   // --- 1. AUTHORIZATION ---
+  const userId = await getAuthenticatedUserId(graphqlUrl, authHeader);
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized: invalid or missing user token' });
+  }
+
   // Query using the USER token to verify they have access to this org, and get their role.
   const checkAccessQuery = `
     query CheckApprovalAccess($runId: uuid!, $stepId: uuid!) {
@@ -76,44 +88,32 @@ export default async function handleApproveStep(req: Request, res: Response) {
 
     const orgMembers = stepRun.workflow_run.workflow.organization.org_members;
     
-    // We need the user's ID to check their role. We can't trust the client for user_id.
-    // We parse the JWT payload without verifying signature since the API gateway already verified it, OR we can fetch `auth.users` with the user token.
-    const token = authHeader.split(' ')[1];
-    const payloadBase64 = token.split('.')[1];
-    let userId = null;
-    try {
-      const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
-      userId = payload['https://hasura.io/jwt/claims']?.['x-hasura-user-id'];
-    } catch (e) {
-      return res.status(401).json({ error: 'Invalid token payload' });
-    }
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Could not extract user ID from token' });
-    }
-
     const membership = orgMembers.find((m: any) => m.user_id === userId);
     if (!membership || (membership.role !== 'owner' && membership.role !== 'editor')) {
       return res.status(403).json({ error: 'Approval denied: Requires owner or editor role.' });
     }
 
-    // --- 2. APPROVE THE STEP ---
-    // Update the step run to completed and record the approver
+    // --- 2. APPROVE THE STEP (ATOMIC UPDATE) ---
+    // Use an atomic update where status = "paused" to prevent concurrent duplicate approvals
     const approveMutation = `
       mutation ApproveStepRun($id: uuid!, $userId: uuid!) {
-        update_step_runs_by_pk(pk_columns: {id: $id}, _set: {
+        update_step_runs(where: {id: {_eq: $id}, status: {_eq: "paused"}}, _set: {
           status: "completed",
           approved_by: $userId,
           approved_at: "now()",
           completed_at: "now()",
           output: { "approved": true }
         }) {
-          id
+          affected_rows
         }
       }
     `;
 
-    await executeGraphQL(graphqlUrl, adminSecret, approveMutation, { id: stepId, userId });
+    const mutationRes = await executeGraphQL(graphqlUrl, adminSecret, approveMutation, { id: stepId, userId });
+    
+    if (mutationRes.update_step_runs.affected_rows === 0) {
+      return res.status(409).json({ error: 'Conflict: Step was already approved or is no longer paused.' });
+    }
 
     // --- 3. RESUME WORKFLOW RUN ---
     const orgId = stepRun.workflow_run.workflow.org_id;

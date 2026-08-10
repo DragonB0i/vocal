@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { runWorkflowEngine } from './_shared/runner';
+import { checkRateLimit, checkIdempotency, getAuthenticatedUserId } from './_shared/security';
 
 export default async function handler(req: Request, res: Response) {
   // CORS handling
@@ -38,7 +39,23 @@ export default async function handler(req: Request, res: Response) {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 
+  // --- 0. RATE LIMITING & IDEMPOTENCY ---
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(String(clientIp), 30)) {
+    return res.status(429).json({ error: 'Too Many Requests' });
+  }
+
+  const idempotencyKey = req.headers['idempotency-key'] as string;
+  if (idempotencyKey && !checkIdempotency(`exec:${idempotencyKey}`)) {
+    return res.status(409).json({ error: 'Duplicate execution request' });
+  }
+
   // --- 1. AUTHORIZATION ---
+  const userId = await getAuthenticatedUserId(graphqlUrl, authHeader);
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized: invalid or missing user token' });
+  }
+
   // We query the workflow using the USER's token. This ensures they at least belong to the org.
   const checkAccessQuery = `
     query CheckWorkflowAccess($id: uuid!) {
@@ -80,29 +97,14 @@ export default async function handler(req: Request, res: Response) {
       return res.status(403).json({ error: 'Workflow not found or access denied' });
     }
 
-    // Determine the user's role. Nhost JWT doesn't give us the precise user ID easily in an edge function without verifying JWT manually.
-    // However, the GraphQL query was executed under their identity. The `org_members` array returned 
-    // will ONLY contain their own membership if row-level security isolates it, or all memberships if they can see all.
-    // In Phase 2, users can read all org_members in their organization. So we need their user ID.
-    // We can fetch the user ID from the Hasura JWT endpoints or from Nhost Auth `/v1/auth/user`.
-    // An easier Hasura trick: `query { auth_users { id } }` might return their user ID if they have access to their own record.
-    // But let's verify via the auth endpoint or decode the JWT safely.
-    // Actually, we can just ask Hasura to return the current user's ID by calling a custom action or using `x-hasura-user-id`? 
-    // We can decode the JWT payload! The JWT is not encrypted, just base64 encoded.
-    const token = authHeader.replace('Bearer ', '');
-    const payloadBase64 = token.split('.')[1];
-    if (!payloadBase64) throw new Error('Invalid token');
-    const payloadStr = Buffer.from(payloadBase64, 'base64').toString('utf8');
-    const payload = JSON.parse(payloadStr);
-    const userId = payload['https://hasura.io/jwt/claims']?.['x-hasura-user-id'];
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized: missing user ID in token' });
-    }
-
     const membership = workflow.organization.org_members.find((m: any) => m.user_id === userId);
     if (!membership || (membership.role !== 'owner' && membership.role !== 'editor')) {
       return res.status(403).json({ error: 'Execution denied: Requires owner or editor role in this organization.' });
+    }
+
+    // Prevent identical workflow concurrent clicks by using workflowId idempotency if no key provided
+    if (!idempotencyKey && !checkIdempotency(`exec-wf:${userId}:${workflowId}`)) {
+       return res.status(409).json({ error: 'Execution already in progress. Please wait.' });
     }
 
     // --- 2. EXECUTE WORKFLOW ---
