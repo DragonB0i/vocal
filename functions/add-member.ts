@@ -10,35 +10,68 @@ export default async function addMember(req: Request, res: Response) {
     return res.status(400).json({ message: 'Missing required fields' });
   }
 
-  const adminSecret = process.env.NHOST_ADMIN_SECRET;
-  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${process.env.NHOST_SUBDOMAIN}.graphql.${process.env.NHOST_REGION}.nhost.run/v1/graphql`;
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
 
-  const query = `
-    mutation AddMember($orgId: uuid!, $userId: uuid!, $role: String!) {
-      insert_org_members_one(object: {
-        org_id: $orgId,
-        user_id: $userId,
-        role: $role
-      }) {
-        id
-      }
-    }
-  `;
+  const subdomain = process.env.NHOST_SUBDOMAIN;
+  const region = process.env.NHOST_REGION;
+  const adminSecret = process.env.NHOST_ADMIN_SECRET;
+  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${subdomain}.graphql.${region}.nhost.run/v1/graphql`;
+  const authEndpoint = `https://${subdomain}.auth.${region}.nhost.run/v1/user`;
 
   try {
-    const response = await fetch(graphqlEndpoint, {
+    // 1. Verify caller identity via Nhost Auth
+    const userRes = await fetch(authEndpoint, {
+      headers: { Authorization: authHeader }
+    });
+    if (!userRes.ok) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+    const userData = await userRes.json();
+    const callerId = userData.id || userData.user?.id; // Depends on Nhost auth version
+    if (!callerId) {
+      return res.status(401).json({ message: 'Failed to extract user ID' });
+    }
+
+    // 2. Check if caller is owner of the target org
+    const checkQuery = `
+      query CheckOwner($orgId: uuid!, $callerId: uuid!) {
+        org_members(where: {org_id: {_eq: $orgId}, user_id: {_eq: $callerId}, role: {_eq: "owner"}}) {
+          id
+        }
+      }
+    `;
+    const checkRes = await fetch(graphqlEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-hasura-admin-secret': adminSecret as string
-      },
-      body: JSON.stringify({
-        query,
-        variables: { orgId, userId, role }
-      })
+      headers: { 'Content-Type': 'application/json', 'x-hasura-admin-secret': adminSecret as string },
+      body: JSON.stringify({ query: checkQuery, variables: { orgId, callerId } })
+    });
+    const checkData = await checkRes.json();
+    if (!checkData.data?.org_members?.length) {
+      return res.status(403).json({ message: 'Forbidden: Caller is not an owner of this organization' });
+    }
+
+    // 3. Add the member
+    const insertQuery = `
+      mutation AddMember($orgId: uuid!, $userId: uuid!, $role: String!) {
+        insert_org_members_one(object: {
+          org_id: $orgId,
+          user_id: $userId,
+          role: $role
+        }) {
+          id
+        }
+      }
+    `;
+    const insertRes = await fetch(graphqlEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-hasura-admin-secret': adminSecret as string },
+      body: JSON.stringify({ query: insertQuery, variables: { orgId, userId, role } })
     });
 
-    const result = await response.json();
+    const result = await insertRes.json();
     if (result.errors) {
       return res.status(400).json({ errors: result.errors });
     }

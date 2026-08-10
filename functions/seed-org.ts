@@ -5,35 +5,56 @@ export default async function seedOrg(req: Request, res: Response) {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  const { userId, name, slug, role } = req.body;
-  if (!userId || !name || !slug || !role) {
+  const { name, slug } = req.body;
+  if (!name || !slug) {
     return res.status(400).json({ message: 'Missing required fields' });
   }
 
-  // Nhost automatically injects NHOST_ADMIN_SECRET into functions
-  const adminSecret = process.env.NHOST_ADMIN_SECRET;
-  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${process.env.NHOST_SUBDOMAIN}.graphql.${process.env.NHOST_REGION}.nhost.run/v1/graphql`;
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
 
-  const query = `
-    mutation CreateOrgAndMember($name: String!, $slug: String!, $userId: uuid!, $role: String!) {
-      insert_organizations_one(object: {
-        name: $name,
-        slug: $slug,
-        org_members: {
-          data: [
-            {
-              user_id: $userId,
-              role: $role
-            }
-          ]
-        }
-      }) {
-        id
-      }
-    }
-  `;
+  const subdomain = process.env.NHOST_SUBDOMAIN;
+  const region = process.env.NHOST_REGION;
+  const adminSecret = process.env.NHOST_ADMIN_SECRET;
+  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${subdomain}.graphql.${region}.nhost.run/v1/graphql`;
+  const authEndpoint = `https://${subdomain}.auth.${region}.nhost.run/v1/user`;
 
   try {
+    // 1. Verify caller identity via Nhost Auth
+    const userRes = await fetch(authEndpoint, {
+      headers: { Authorization: authHeader }
+    });
+    if (!userRes.ok) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+    const userData = await userRes.json();
+    const callerId = userData.id || userData.user?.id;
+    if (!callerId) {
+      return res.status(401).json({ message: 'Failed to extract user ID' });
+    }
+
+    // 2. Create the org and make the caller the owner
+    const query = `
+      mutation CreateOrgAndMember($name: String!, $slug: String!, $userId: uuid!) {
+        insert_organizations_one(object: {
+          name: $name,
+          slug: $slug,
+          org_members: {
+            data: [
+              {
+                user_id: $userId,
+                role: "owner"
+              }
+            ]
+          }
+        }) {
+          id
+        }
+      }
+    `;
+
     const response = await fetch(graphqlEndpoint, {
       method: 'POST',
       headers: {
@@ -42,7 +63,7 @@ export default async function seedOrg(req: Request, res: Response) {
       },
       body: JSON.stringify({
         query,
-        variables: { name, slug, userId, role }
+        variables: { name, slug, userId: callerId }
       })
     });
 

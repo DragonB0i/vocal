@@ -13,10 +13,10 @@ async function main() {
   console.log("Starting Live Phase 2 Validation...");
 
   const users = [
-    { email: `ownera_${Date.now()}@test.com`, password: 'password123', role: 'owner', org: 'A' },
-    { email: `editora_${Date.now()}@test.com`, password: 'password123', role: 'editor', org: 'A' },
-    { email: `viewera_${Date.now()}@test.com`, password: 'password123', role: 'viewer', org: 'A' },
-    { email: `ownerb_${Date.now()}@test.com`, password: 'password123', role: 'owner', org: 'B' },
+    { email: 'nickvanessa5+ownera@gmail.com', password: 'VocalTestPassword123!', role: 'owner', org: 'A' },
+    { email: 'nickvanessa5+editora@gmail.com', password: 'VocalTestPassword123!', role: 'editor', org: 'A' },
+    { email: 'nickvanessa5+viewera@gmail.com', password: 'VocalTestPassword123!', role: 'viewer', org: 'A' },
+    { email: 'nickvanessa5+ownerb@gmail.com', password: 'VocalTestPassword123!', role: 'owner', org: 'B' },
   ];
 
   const sessions = {};
@@ -51,21 +51,21 @@ async function main() {
   // 2. Seed Organizations via Cloud Functions
   console.log("\n2. Seeding Organizations via Cloud Functions...");
   
-  async function seedOrg(name, slug, userId, role) {
+  async function seedOrg(name, slug, accessToken) {
     const res = await fetch(`https://${SUBDOMAIN}.functions.${REGION}.nhost.run/v1/seed-org`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, slug, userId, role })
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      body: JSON.stringify({ name, slug })
     });
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(JSON.stringify(data));
     return data.data.insert_organizations_one.id;
   }
 
-  async function addMember(orgId, userId, role) {
+  async function addMember(orgId, userId, role, ownerAccessToken) {
     const res = await fetch(`https://${SUBDOMAIN}.functions.${REGION}.nhost.run/v1/add-member`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ownerAccessToken}` },
       body: JSON.stringify({ orgId, userId, role })
     });
     const data = await res.json();
@@ -74,16 +74,16 @@ async function main() {
 
   let orgA_Id, orgB_Id;
   try {
-    orgA_Id = await seedOrg('Org A', 'org-a-' + Date.now(), ownerA.user.id, 'owner');
+    orgA_Id = await seedOrg('Org A', 'org-a-' + Date.now(), ownerA.accessToken);
     console.log(` - Created Org A: ${orgA_Id}`);
     
-    orgB_Id = await seedOrg('Org B', 'org-b-' + Date.now(), ownerB.user.id, 'owner');
+    orgB_Id = await seedOrg('Org B', 'org-b-' + Date.now(), ownerB.accessToken);
     console.log(` - Created Org B: ${orgB_Id}`);
 
-    await addMember(orgA_Id, editorA.user.id, 'editor');
+    await addMember(orgA_Id, editorA.user.id, 'editor', ownerA.accessToken);
     console.log(` - Added Editor A to Org A`);
     
-    await addMember(orgA_Id, viewerA.user.id, 'viewer');
+    await addMember(orgA_Id, viewerA.user.id, 'viewer', ownerA.accessToken);
     console.log(` - Added Viewer A to Org A`);
   } catch (err) {
     console.error("Failed to seed orgs:", err);
