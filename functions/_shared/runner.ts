@@ -1,43 +1,114 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+
+// Helper to resolve property path like "steps.FetchData.output.title"
+function resolveContextPath(context: any, path: string): any {
+  if (!path || typeof path !== 'string') return undefined;
+  const parts = path.split('.');
+  let current = context;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+// Simple template interpolation (e.g. "Hello {{ steps.FetchData.output.name }}")
+function interpolateString(template: string, context: any): string {
+  if (typeof template !== 'string') return template;
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, path) => {
+    const val = resolveContextPath(context, path);
+    return val !== undefined && val !== null ? String(val) : '';
+  });
+}
+
+function interpolateConfig(config: any, context: any): any {
+  if (typeof config === 'string') {
+    return interpolateString(config, context);
+  } else if (Array.isArray(config)) {
+    return config.map(item => interpolateConfig(item, context));
+  } else if (config !== null && typeof config === 'object') {
+    const newConfig: any = {};
+    for (const [key, value] of Object.entries(config)) {
+      newConfig[key] = interpolateConfig(value, context);
+    }
+    return newConfig;
+  }
+  return config;
+}
+
 export async function runWorkflowEngine(
   graphqlUrl: string, 
   adminSecret: string, 
   workflowId: string, 
   orgId: string, 
   userId: string | null,
-  triggerContext: any = null
+  triggerContext: any = null,
+  existingRunId: string | null = null
 ) {
-  // 1. Initialize Run
-  const initQuery = `
-    mutation InitExecution($workflowId: uuid!, $orgId: uuid!, $userId: uuid) {
-      insert_workflow_runs_one(object: {
-        workflow_id: $workflowId,
-        status: "running",
-        started_at: "now()"
-      }) {
-        id
+  let runId = existingRunId;
+  const executionContext: any = {
+    trigger: triggerContext || {},
+    steps: {}
+  };
+
+  if (!runId) {
+    // 1. Initialize New Run
+    const initQuery = `
+      mutation InitExecution($workflowId: uuid!, $orgId: uuid!, $userId: uuid) {
+        insert_workflow_runs_one(object: {
+          workflow_id: $workflowId,
+          status: "running",
+          started_at: "now()"
+        }) {
+          id
+        }
+        insert_audit_logs_one(object: {
+          org_id: $orgId,
+          user_id: $userId,
+          action: "workflow_started",
+          entity_type: "workflow_run",
+          entity_id: $workflowId
+        }) {
+          id
+        }
       }
-      insert_audit_logs_one(object: {
-        org_id: $orgId,
-        user_id: $userId,
-        action: "workflow_started",
-        entity_type: "workflow_run",
-        entity_id: $workflowId
-      }) {
-        id
+    `;
+    const initData = await executeGraphQL(graphqlUrl, adminSecret, initQuery, {
+      workflowId, orgId, userId
+    });
+    runId = initData.insert_workflow_runs_one.id;
+  } else {
+    // Resume Run: Update status to running
+    const resumeQuery = `
+      mutation ResumeRun($id: uuid!) {
+        update_workflow_runs_by_pk(pk_columns: {id: $id}, _set: {status: "running"}) {
+          id
+        }
+      }
+    `;
+    await executeGraphQL(graphqlUrl, adminSecret, resumeQuery, { id: runId });
+    
+    // Fetch completed step outputs to populate context
+    const pastStepsQuery = `
+      query GetPastSteps($runId: uuid!) {
+        step_runs(where: {workflow_run_id: {_eq: $runId}, status: {_in: ["completed", "failed"]}}) {
+          status
+          output
+          workflow_step {
+            name
+          }
+        }
+      }
+    `;
+    const pastStepsData = await executeGraphQL(graphqlUrl, adminSecret, pastStepsQuery, { runId });
+    for (const stepRun of pastStepsData.step_runs) {
+      if (stepRun.status === 'completed' && stepRun.workflow_step) {
+        executionContext.steps[stepRun.workflow_step.name] = { output: stepRun.output };
       }
     }
-  `;
+  }
 
-  const initData = await executeGraphQL(graphqlUrl, adminSecret, initQuery, {
-    workflowId,
-    orgId,
-    userId
-  });
-
-  const runId = initData.insert_workflow_runs_one.id;
-
-  // 2. Fetch steps
+  // 2. Fetch all steps for workflow
   const stepsQuery = `
     query GetSteps($workflowId: uuid!) {
       workflow_steps(where: {workflow_id: {_eq: $workflowId}}, order_by: {position: asc}) {
@@ -52,51 +123,103 @@ export async function runWorkflowEngine(
   const steps = stepsData.workflow_steps;
 
   let hasFailure = false;
+  let isPaused = false;
+  let isCancelled = false;
+
+  // Fetch current step runs to see if we already completed them (resuming)
+  const currentStepRunsQuery = `
+    query GetCurrentStepRuns($runId: uuid!) {
+      step_runs(where: {workflow_run_id: {_eq: $runId}}) {
+        id
+        workflow_step_id
+        status
+      }
+    }
+  `;
+  const currentStepRunsData = await executeGraphQL(graphqlUrl, adminSecret, currentStepRunsQuery, { runId });
+  const completedStepIds = new Set(
+    currentStepRunsData.step_runs
+      .filter((sr: any) => sr.status === 'completed' || sr.status === 'failed' || sr.status === 'cancelled')
+      .map((sr: any) => sr.workflow_step_id)
+  );
+  
+  const pausedStepRuns = currentStepRunsData.step_runs.filter((sr: any) => sr.status === 'paused');
 
   // 3. Execute steps sequentially
   for (const step of steps) {
-    const createStepRunQuery = `
-      mutation CreateStepRun($runId: uuid!, $stepId: uuid!) {
-        insert_step_runs_one(object: {
-          workflow_run_id: $runId,
-          workflow_step_id: $stepId,
-          status: "running",
-          started_at: "now()"
-        }) {
-          id
+    if (completedStepIds.has(step.id)) {
+      continue; // Skip already completed steps on resume
+    }
+
+    if (isCancelled) {
+      // Mark downstream steps as cancelled if a branch halted execution
+      const cancelStepQuery = `
+        mutation CancelStep($runId: uuid!, $stepId: uuid!) {
+          insert_step_runs_one(object: {
+            workflow_run_id: $runId,
+            workflow_step_id: $stepId,
+            status: "cancelled",
+            started_at: "now()",
+            completed_at: "now()"
+          }) {
+            id
+          }
         }
-      }
-    `;
-    const stepRunData = await executeGraphQL(graphqlUrl, adminSecret, createStepRunQuery, {
-      runId,
-      stepId: step.id
-    });
-    const stepRunId = stepRunData.insert_step_runs_one.id;
+      `;
+      await executeGraphQL(graphqlUrl, adminSecret, cancelStepQuery, { runId, stepId: step.id });
+      continue;
+    }
+
+    // Find if we have a paused step run for this step
+    const existingPausedRun = pausedStepRuns.find((sr: any) => sr.workflow_step_id === step.id);
+    let stepRunId = existingPausedRun?.id;
+
+    if (!stepRunId) {
+      const createStepRunQuery = `
+        mutation CreateStepRun($runId: uuid!, $stepId: uuid!) {
+          insert_step_runs_one(object: {
+            workflow_run_id: $runId,
+            workflow_step_id: $stepId,
+            status: "running",
+            started_at: "now()"
+          }) {
+            id
+          }
+        }
+      `;
+      const stepRunData = await executeGraphQL(graphqlUrl, adminSecret, createStepRunQuery, { runId, stepId: step.id });
+      stepRunId = stepRunData.insert_step_runs_one.id;
+    } else {
+      // Update it to running
+      const updateStepRunQuery = `
+        mutation UpdateStepRun($id: uuid!) {
+          update_step_runs_by_pk(pk_columns: {id: $id}, _set: {status: "running"}) {
+            id
+          }
+        }
+      `;
+      await executeGraphQL(graphqlUrl, adminSecret, updateStepRunQuery, { id: stepRunId });
+    }
 
     let stepStatus = 'completed';
-    let stepOutput = null;
-    let stepError = null;
+    let stepOutput: any = null;
+    let stepError: any = null;
 
     try {
       if (step.type === 'http_request') {
-        const url = new URL(step.config.url);
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-          throw new Error('SSRF Protection: Only http and https protocols are allowed');
-        }
-        if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.startsWith('169.254') || url.hostname === '0.0.0.0') {
-          throw new Error('SSRF Protection: Invalid hostname');
-        }
-        if (/(^10\.)|(^192\.168\.)|(^172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(url.hostname)) {
-          throw new Error('SSRF Protection: Private IP ranges are restricted');
-        }
+        const config = interpolateConfig(step.config, executionContext);
+        const url = new URL(config.url);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('SSRF Protection: Only http and https protocols are allowed');
+        if (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.startsWith('169.254') || url.hostname === '0.0.0.0') throw new Error('SSRF Protection: Invalid hostname');
+        if (/(^10\.)|(^192\.168\.)|(^172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(url.hostname)) throw new Error('SSRF Protection: Private IP ranges are restricted');
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
         
-        const method = step.config.method || 'GET';
+        const method = config.method || 'GET';
         const fetchOptions: any = { method, signal: controller.signal };
-        if (step.config.body && (method === 'POST' || method === 'PUT')) {
-          fetchOptions.body = JSON.stringify(step.config.body);
+        if (config.body && (method === 'POST' || method === 'PUT')) {
+          fetchOptions.body = JSON.stringify(config.body);
           fetchOptions.headers = { 'Content-Type': 'application/json' };
         }
 
@@ -108,10 +231,9 @@ export async function runWorkflowEngine(
           status: res.status,
           body: responseText.substring(0, 5000)
         };
-        if (!res.ok) {
-          throw new Error(`HTTP Error: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
       } else if (step.type === 'notify') {
+        const config = interpolateConfig(step.config, executionContext);
         const notifyQuery = `
           mutation CreateNotification($orgId: uuid!, $runId: uuid!, $message: String!) {
             insert_notifications_one(object: {
@@ -128,9 +250,99 @@ export async function runWorkflowEngine(
         await executeGraphQL(graphqlUrl, adminSecret, notifyQuery, {
           orgId,
           runId,
-          message: step.config.message || `Notification from step: ${step.name}`
+          message: config.message || `Notification from step: ${step.name}`
         });
         stepOutput = { success: true };
+      } else if (step.type === 'conditional_branch') {
+        const condition = step.config.condition;
+        if (!condition || !condition.field || !condition.operator) throw new Error('Malformed conditional branch configuration');
+        
+        const val1 = resolveContextPath(executionContext, condition.field);
+        const val2 = condition.value;
+        let matched = false;
+
+        switch (condition.operator) {
+          case 'equals': matched = (val1 == val2); break;
+          case 'not_equals': matched = (val1 != val2); break;
+          case 'contains': matched = (String(val1 || '').includes(String(val2 || ''))); break;
+          case 'greater_than': matched = (Number(val1) > Number(val2)); break;
+          case 'less_than': matched = (Number(val1) < Number(val2)); break;
+          case 'exists': matched = (val1 !== undefined && val1 !== null); break;
+          default: throw new Error(`Unsupported operator: ${condition.operator}`);
+        }
+
+        stepOutput = { matched };
+        if (!matched) {
+          isCancelled = true;
+        }
+      } else if (step.type === 'approval_gate') {
+        stepStatus = 'paused';
+        isPaused = true;
+      } else if (step.type === 'llm_call') {
+        const config = interpolateConfig(step.config, executionContext);
+        if (config.provider === 'openai') {
+          const apiKey = process.env.OPENAI_API_KEY;
+          if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set');
+
+          const prompt = String(config.prompt || '').substring(0, 10000);
+          const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: config.model || 'gpt-3.5-turbo',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: Number(config.temperature) || 0.2,
+              max_tokens: 2000
+            })
+          });
+          const data: any = await openaiRes.json();
+          if (!openaiRes.ok) throw new Error(`OpenAI API error: ${data.error?.message || 'Unknown'}`);
+          
+          stepOutput = {
+            response: data.choices?.[0]?.message?.content || '',
+            usage: data.usage
+          };
+        } else {
+          throw new Error(`Unsupported LLM provider: ${config.provider}`);
+        }
+      } else if (step.type === 'db_write') {
+        const config = interpolateConfig(step.config, executionContext);
+        if (config.table !== 'custom_app_data') {
+          throw new Error(`Unauthorized table: ${config.table}. Only custom_app_data is allowed.`);
+        }
+        if (config.operation !== 'insert' && config.operation !== 'update') {
+          throw new Error(`Unauthorized operation: ${config.operation}. Only insert and update are allowed.`);
+        }
+
+        const payload = config.data || {};
+        if (typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new Error('Data must be a JSON object');
+        }
+
+        if (config.operation === 'insert') {
+          const insertQuery = `
+            mutation DBWriteInsert($orgId: uuid!, $data: jsonb!) {
+              insert_custom_app_data_one(object: {org_id: $orgId, data: $data}) { id }
+            }
+          `;
+          const res = await executeGraphQL(graphqlUrl, adminSecret, insertQuery, { orgId, data: payload });
+          stepOutput = { id: res.insert_custom_app_data_one.id };
+        } else {
+          if (!payload.id) throw new Error('Update requires an id field in data');
+          const updateQuery = `
+            mutation DBWriteUpdate($orgId: uuid!, $id: uuid!, $data: jsonb!) {
+              update_custom_app_data(where: {org_id: {_eq: $orgId}, id: {_eq: $id}}, _set: {data: $data}) {
+                affected_rows
+              }
+            }
+          `;
+          const { id: recordId, ...updateData } = payload;
+          const res = await executeGraphQL(graphqlUrl, adminSecret, updateQuery, { orgId, id: recordId, data: updateData });
+          if (res.update_custom_app_data.affected_rows === 0) {
+            throw new Error(`Update failed: record not found or does not belong to organization`);
+          }
+          stepOutput = { affected_rows: res.update_custom_app_data.affected_rows };
+        }
       } else {
         throw new Error(`Unsupported step type: ${step.type}`);
       }
@@ -146,7 +358,7 @@ export async function runWorkflowEngine(
           status: $status,
           output: $output,
           error: $error,
-          completed_at: "now()"
+          completed_at: ${stepStatus === 'paused' ? 'null' : '"now()"'}
         }) {
           id
         }
@@ -159,38 +371,30 @@ export async function runWorkflowEngine(
       error: stepError
     });
 
-    if (hasFailure) {
+    if (stepStatus === 'completed') {
+      executionContext.steps[step.name] = { output: stepOutput };
+    }
+
+    if (hasFailure || isPaused) {
       break;
     }
   }
 
-  // 4. Finalize run
-  const finalStatus = hasFailure ? 'failed' : 'completed';
+  let finalStatus = 'completed';
+  if (hasFailure) finalStatus = 'failed';
+  if (isPaused) finalStatus = 'paused';
+
   const finalizeRunQuery = `
-    mutation FinalizeRun($id: uuid!, $status: String!, $orgId: uuid!, $userId: uuid) {
+    mutation FinalizeRun($id: uuid!, $status: String!) {
       update_workflow_runs_by_pk(pk_columns: {id: $id}, _set: {
         status: $status,
-        completed_at: "now()"
-      }) {
-        id
-      }
-      insert_audit_logs_one(object: {
-        org_id: $orgId,
-        user_id: $userId,
-        action: $status,
-        entity_type: "workflow_run",
-        entity_id: $id
+        completed_at: ${isPaused || finalStatus === 'running' ? 'null' : '"now()"'}
       }) {
         id
       }
     }
   `;
-  await executeGraphQL(graphqlUrl, adminSecret, finalizeRunQuery, {
-    id: runId,
-    status: finalStatus,
-    orgId,
-    userId
-  });
+  await executeGraphQL(graphqlUrl, adminSecret, finalizeRunQuery, { id: runId, status: finalStatus });
 
   return { runId, status: finalStatus };
 }
@@ -198,16 +402,11 @@ export async function runWorkflowEngine(
 export async function executeGraphQL(url: string, adminSecret: string, query: string, variables: any = {}) {
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-hasura-admin-secret': adminSecret
-    },
+    headers: { 'Content-Type': 'application/json', 'x-hasura-admin-secret': adminSecret },
     body: JSON.stringify({ query, variables })
   });
 
   const json: any = await response.json();
-  if (json.errors) {
-    throw new Error('GraphQL Error: ' + JSON.stringify(json.errors));
-  }
+  if (json.errors) throw new Error('GraphQL Error: ' + JSON.stringify(json.errors));
   return json.data;
 }

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useOrganization } from '@/components/layout/OrganizationContext';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/graphql';
-import { Loader2, AlertCircle, CheckCircle2, XCircle, ArrowLeft, Play, Trash2, ToggleRight, ToggleLeft, Key } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, XCircle, ArrowLeft, Play, Trash2, ToggleRight, ToggleLeft, Key, Clock, Check } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
@@ -23,6 +23,7 @@ const GET_WORKFLOW = `
         name
         type
         position
+        config
       }
       workflow_triggers {
         id
@@ -34,18 +35,30 @@ const GET_WORKFLOW = `
         status
         started_at
         completed_at
+        step_runs(order_by: {created_at: asc}) {
+          id
+          status
+          output
+          error
+          workflow_step {
+            id
+            name
+            type
+          }
+        }
       }
     }
   }
 `;
 
 const ADD_STEP = `
-  mutation AddStep($workflowId: uuid!, $name: String!, $type: String!, $config: jsonb!) {
+  mutation AddStep($workflowId: uuid!, $name: String!, $type: String!, $config: jsonb!, $position: Int!) {
     insert_workflow_steps_one(object: {
       workflow_id: $workflowId,
       name: $name,
       type: $type,
-      config: $config
+      config: $config,
+      position: $position
     }) {
       id
     }
@@ -82,6 +95,7 @@ export default function WorkflowDetailPage() {
   const [isAddStepOpen, setIsAddStepOpen] = useState(false);
   const [newStepName, setNewStepName] = useState('');
   const [newStepType, setNewStepType] = useState('http_request');
+  const [newStepConfig, setNewStepConfig] = useState<any>({});
   const [isAdding, setIsAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -93,15 +107,31 @@ export default function WorkflowDetailPage() {
     setIsAdding(true);
     setAddError(null);
     try {
+      const position = workflow.workflow_steps.length;
+      const finalConfig = { ...newStepConfig };
+      
+      if (newStepType === 'http_request') {
+         if (!finalConfig.url) throw new Error("URL is required");
+      } else if (newStepType === 'conditional_branch') {
+         if (!finalConfig.condition?.field || !finalConfig.condition?.operator) throw new Error("Condition field and operator are required");
+      } else if (newStepType === 'llm_call') {
+         if (!finalConfig.provider || !finalConfig.prompt) throw new Error("Provider and Prompt are required");
+      } else if (newStepType === 'db_write') {
+         if (finalConfig.table !== 'custom_app_data') throw new Error("Only custom_app_data is allowed");
+         if (!finalConfig.operation) throw new Error("Operation is required");
+      }
+
       await fetcher(ADD_STEP, {
         workflowId: id,
         name: newStepName,
         type: newStepType,
-        config: {}
+        config: finalConfig,
+        position
       });
       mutate();
       setIsAddStepOpen(false);
       setNewStepName('');
+      setNewStepConfig({});
     } catch (err: any) {
       setAddError(err.message || 'Failed to add step. Permission denied.');
     } finally {
@@ -111,6 +141,7 @@ export default function WorkflowDetailPage() {
 
   const [isCreatingWebhook, setIsCreatingWebhook] = useState(false);
   const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [approvingStepId, setApprovingStepId] = useState<string | null>(null);
 
   const handleCreateWebhook = async () => {
     setIsCreatingWebhook(true);
@@ -126,6 +157,41 @@ export default function WorkflowDetailPage() {
       alert(err.message || 'Failed to create webhook');
     } finally {
       setIsCreatingWebhook(false);
+    }
+  };
+
+  const handleRunWorkflow = async () => {
+    setIsRunning(true);
+    setRunError(null);
+    try {
+      const nhost = (window as any).__NHOST_CLIENT__;
+      if (!nhost) throw new Error('Nhost client not found');
+      
+      const { res, error } = await nhost.functions.call('execute-workflow', { workflowId: id });
+      
+      if (error) {
+        throw new Error(error.message || 'Execution failed');
+      }
+      
+      mutate();
+    } catch (err: any) {
+      setRunError(err.message || 'Failed to execute workflow.');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const handleApproveStep = async (runId: string, stepId: string) => {
+    setApprovingStepId(stepId);
+    try {
+      const nhost = (window as any).__NHOST_CLIENT__;
+      const { res, error } = await nhost.functions.call('approve-step', { runId, stepId });
+      if (error) throw new Error(error.message);
+      mutate();
+    } catch (err: any) {
+      alert(err.message || 'Failed to approve step');
+    } finally {
+      setApprovingStepId(null);
     }
   };
 
@@ -175,27 +241,6 @@ export default function WorkflowDetailPage() {
   }
 
   const workflow = data.workflows_by_pk;
-
-  const handleRunWorkflow = async () => {
-    setIsRunning(true);
-    setRunError(null);
-    try {
-      const nhost = (window as any).__NHOST_CLIENT__;
-      if (!nhost) throw new Error('Nhost client not found');
-      
-      const { res, error } = await nhost.functions.call('execute-workflow', { workflowId: id });
-      
-      if (error) {
-        throw new Error(error.message || 'Execution failed');
-      }
-      
-      mutate();
-    } catch (err: any) {
-      setRunError(err.message || 'Failed to execute workflow.');
-    } finally {
-      setIsRunning(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -278,12 +323,119 @@ export default function WorkflowDetailPage() {
                     <label className="block text-sm font-medium text-gray-700">Type</label>
                     <select value={newStepType} onChange={e => setNewStepType(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white">
                       <option value="http_request">HTTP Request</option>
-                      <option value="transform">Data Transform</option>
+                      <option value="conditional_branch">Conditional Branch</option>
+                      <option value="approval_gate">Approval Gate</option>
+                      <option value="llm_call">LLM Call</option>
                       <option value="db_write" disabled={isEditor}>Database Write (Owner Only)</option>
                       <option value="notify" disabled={isEditor}>Notification (Owner Only)</option>
                     </select>
                   </div>
                 </div>
+
+                <div className="mt-4 border-t border-gray-200 pt-4">
+                  {newStepType === 'http_request' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">URL</label>
+                        <input type="text" required value={newStepConfig.url || ''} onChange={e => setNewStepConfig({...newStepConfig, url: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Method</label>
+                        <select value={newStepConfig.method || 'GET'} onChange={e => setNewStepConfig({...newStepConfig, method: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white">
+                          <option>GET</option><option>POST</option><option>PUT</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {newStepType === 'conditional_branch' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Field Path (e.g. steps.Step1.output.status)</label>
+                        <input type="text" required value={newStepConfig.condition?.field || ''} onChange={e => setNewStepConfig({...newStepConfig, condition: {...newStepConfig.condition, field: e.target.value}})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Operator</label>
+                          <select required value={newStepConfig.condition?.operator || 'equals'} onChange={e => setNewStepConfig({...newStepConfig, condition: {...newStepConfig.condition, operator: e.target.value}})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white">
+                            <option value="equals">Equals</option>
+                            <option value="not_equals">Not Equals</option>
+                            <option value="contains">Contains</option>
+                            <option value="greater_than">Greater Than</option>
+                            <option value="less_than">Less Than</option>
+                            <option value="exists">Exists</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Value</label>
+                          <input type="text" value={newStepConfig.condition?.value || ''} onChange={e => setNewStepConfig({...newStepConfig, condition: {...newStepConfig.condition, value: e.target.value}})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {newStepType === 'llm_call' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Provider</label>
+                        <select required value={newStepConfig.provider || 'openai'} onChange={e => setNewStepConfig({...newStepConfig, provider: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white">
+                          <option value="openai">OpenAI</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Model</label>
+                        <input type="text" value={newStepConfig.model || 'gpt-3.5-turbo'} onChange={e => setNewStepConfig({...newStepConfig, model: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Prompt (Supports {'{{ interpolation }}'})</label>
+                        <textarea required value={newStepConfig.prompt || ''} onChange={e => setNewStepConfig({...newStepConfig, prompt: e.target.value})} rows={3} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" />
+                      </div>
+                    </div>
+                  )}
+
+                  {newStepType === 'db_write' && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Table (Allowed only)</label>
+                          <select required value={newStepConfig.table || 'custom_app_data'} onChange={e => setNewStepConfig({...newStepConfig, table: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white">
+                            <option value="custom_app_data">custom_app_data</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Operation</label>
+                          <select required value={newStepConfig.operation || 'insert'} onChange={e => setNewStepConfig({...newStepConfig, operation: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white">
+                            <option value="insert">Insert</option>
+                            <option value="update">Update</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Data (JSON object)</label>
+                        <textarea required placeholder='{"key": "value"}' onChange={e => {
+                          try {
+                            const parsed = JSON.parse(e.target.value);
+                            setNewStepConfig({...newStepConfig, data: parsed});
+                          } catch(err) { /* ignore until submit */ }
+                        }} rows={3} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border font-mono text-xs" />
+                      </div>
+                    </div>
+                  )}
+
+                  {newStepType === 'notify' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Message</label>
+                        <input type="text" required value={newStepConfig.message || ''} onChange={e => setNewStepConfig({...newStepConfig, message: e.target.value})} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {newStepType === 'approval_gate' && (
+                    <p className="text-sm text-gray-500">Execution will pause until an authorized user approves it.</p>
+                  )}
+                </div>
+
                 {addError && <p className="mt-2 text-sm text-red-600">{addError}</p>}
                 <div className="mt-4 flex gap-2">
                   <button type="submit" disabled={isAdding} className="bg-indigo-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-indigo-500">Save</button>
@@ -297,14 +449,14 @@ export default function WorkflowDetailPage() {
                 <li className="py-4 text-sm text-gray-500">No steps defined.</li>
               ) : (
                 workflow.workflow_steps.map((step: any, index: number) => (
-                  <li key={step.id} className="flex items-center justify-between py-4">
-                    <div className="flex items-center">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-sm font-medium text-gray-500">
+                  <li key={step.id} className="flex items-start justify-between py-4">
+                    <div className="flex items-start">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-sm font-medium text-gray-500 mt-1">
                         {index + 1}
                       </span>
                       <div className="ml-4">
                         <p className="text-sm font-medium text-gray-900">{step.name}</p>
-                        <p className="text-sm text-gray-500 font-mono text-xs">{step.type}</p>
+                        <p className="text-sm text-gray-500 font-mono text-xs mt-0.5">{step.type}</p>
                       </div>
                     </div>
                   </li>
@@ -394,24 +546,64 @@ export default function WorkflowDetailPage() {
             </div>
           </div>
 
-          <div className="bg-white shadow sm:rounded-lg">
+          <div className="bg-white shadow sm:rounded-lg overflow-hidden">
             <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
               <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Runs</h3>
             </div>
             <div className="px-4 py-5 sm:p-6">
-              <ul className="divide-y divide-gray-100">
+              <ul className="divide-y divide-gray-100 space-y-4">
                 {workflow.workflow_runs.length === 0 ? (
                   <p className="text-sm text-gray-500">No runs recorded.</p>
                 ) : (
                   workflow.workflow_runs.map((run: any) => (
-                    <li key={run.id} className="flex items-center justify-between py-3">
-                      <div className="flex items-center">
-                        {run.status === 'success' ? <CheckCircle2 className="h-5 w-5 text-green-500" /> : 
-                         run.status === 'failed' ? <XCircle className="h-5 w-5 text-red-500" /> : 
-                         <Loader2 className="h-5 w-5 text-yellow-500 animate-spin" />}
-                        <span className="ml-3 text-sm text-gray-700">{new Date(run.started_at).toLocaleString()}</span>
+                    <li key={run.id} className="pt-4 first:pt-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          {run.status === 'completed' ? <CheckCircle2 className="h-5 w-5 text-green-500" /> : 
+                           run.status === 'failed' ? <XCircle className="h-5 w-5 text-red-500" /> : 
+                           run.status === 'paused' ? <Clock className="h-5 w-5 text-yellow-500" /> : 
+                           <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />}
+                          <span className="ml-3 text-sm font-medium text-gray-900 capitalize">{run.status}</span>
+                        </div>
+                        <span className="text-xs text-gray-500">{new Date(run.started_at).toLocaleString()}</span>
                       </div>
-                      <span className="text-xs font-mono text-gray-500">{run.id.substring(0, 8)}</span>
+                      
+                      <div className="mt-3 pl-8">
+                        <ul className="space-y-2">
+                          {run.step_runs?.map((sr: any) => (
+                            <li key={sr.id} className="text-sm flex flex-col gap-1 border-l-2 border-gray-200 pl-3 py-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-gray-700">{sr.workflow_step.name}</span>
+                                <span className={`text-xs capitalize ${sr.status === 'completed' ? 'text-green-600' : sr.status === 'failed' ? 'text-red-600' : sr.status === 'paused' ? 'text-yellow-600' : sr.status === 'cancelled' ? 'text-gray-400' : 'text-blue-600'}`}>{sr.status}</span>
+                              </div>
+                              
+                              {sr.status === 'paused' && sr.workflow_step.type === 'approval_gate' && !isViewer && (
+                                <div className="mt-2">
+                                  <button
+                                    onClick={() => handleApproveStep(run.id, sr.id)}
+                                    disabled={approvingStepId === sr.id}
+                                    className="inline-flex items-center rounded bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-600 shadow-sm hover:bg-indigo-100 disabled:opacity-50"
+                                  >
+                                    {approvingStepId === sr.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+                                    Approve & Resume
+                                  </button>
+                                </div>
+                              )}
+
+                              {sr.error && (
+                                <div className="mt-1 bg-red-50 text-red-700 text-xs p-2 rounded">
+                                  {JSON.stringify(sr.error)}
+                                </div>
+                              )}
+                              {sr.output && sr.status !== 'paused' && (
+                                <div className="mt-1 bg-gray-50 text-gray-600 text-xs p-2 rounded font-mono overflow-hidden whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                  {JSON.stringify(sr.output, null, 2)}
+                                </div>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     </li>
                   ))
                 )}
