@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useOrganization } from '@/components/layout/OrganizationContext';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/graphql';
-import { Loader2, AlertCircle, CheckCircle2, XCircle, ArrowLeft, Play } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, XCircle, ArrowLeft, Play, Trash2, ToggleRight, ToggleLeft, Key } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
@@ -27,6 +27,7 @@ const GET_WORKFLOW = `
       workflow_triggers {
         id
         type
+        enabled
       }
       workflow_runs(order_by: {created_at: desc}, limit: 5) {
         id
@@ -46,6 +47,22 @@ const ADD_STEP = `
       type: $type,
       config: $config
     }) {
+      id
+    }
+  }
+`;
+
+const DELETE_TRIGGER = `
+  mutation DeleteTrigger($id: uuid!) {
+    delete_workflow_triggers_by_pk(id: $id) {
+      id
+    }
+  }
+`;
+
+const TOGGLE_TRIGGER = `
+  mutation ToggleTrigger($id: uuid!, $enabled: Boolean!) {
+    update_workflow_triggers_by_pk(pk_columns: {id: $id}, _set: {enabled: $enabled}) {
       id
     }
   }
@@ -89,6 +106,45 @@ export default function WorkflowDetailPage() {
       setAddError(err.message || 'Failed to add step. Permission denied.');
     } finally {
       setIsAdding(false);
+    }
+  };
+
+  const [isCreatingWebhook, setIsCreatingWebhook] = useState(false);
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+
+  const handleCreateWebhook = async () => {
+    setIsCreatingWebhook(true);
+    setWebhookSecret(null);
+    try {
+      const nhost = (window as any).__NHOST_CLIENT__;
+      const { res, error } = await nhost.functions.call('create-webhook', { workflowId: id });
+      if (error) throw new Error(error.message);
+      
+      setWebhookSecret(res.data.secret);
+      mutate();
+    } catch (err: any) {
+      alert(err.message || 'Failed to create webhook');
+    } finally {
+      setIsCreatingWebhook(false);
+    }
+  };
+
+  const handleDeleteTrigger = async (triggerId: string) => {
+    if (!confirm('Are you sure you want to delete this trigger?')) return;
+    try {
+      await fetcher(DELETE_TRIGGER, { id: triggerId });
+      mutate();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete trigger');
+    }
+  };
+
+  const handleToggleTrigger = async (triggerId: string, currentEnabled: boolean) => {
+    try {
+      await fetcher(TOGGLE_TRIGGER, { id: triggerId, enabled: !currentEnabled });
+      mutate();
+    } catch (err: any) {
+      alert(err.message || 'Failed to toggle trigger');
     }
   };
 
@@ -261,17 +317,76 @@ export default function WorkflowDetailPage() {
         {/* Triggers & Recent Runs */}
         <div className="space-y-6">
           <div className="bg-white shadow sm:rounded-lg">
-            <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
+            <div className="border-b border-gray-200 px-4 py-5 sm:px-6 flex justify-between items-center">
               <h3 className="text-base font-semibold leading-6 text-gray-900">Triggers</h3>
+              {activeRole === 'owner' && (
+                <button
+                  type="button"
+                  onClick={handleCreateWebhook}
+                  disabled={isCreatingWebhook}
+                  className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {isCreatingWebhook ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Key className="h-4 w-4 mr-1" />}
+                  Add Webhook
+                </button>
+              )}
             </div>
             <div className="px-4 py-5 sm:p-6">
+              {webhookSecret && (
+                <div className="mb-4 rounded-md bg-yellow-50 p-4 border border-yellow-200">
+                  <div className="flex">
+                    <AlertCircle className="h-5 w-5 text-yellow-400" />
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-yellow-800">Webhook Secret Generated</h3>
+                      <div className="mt-2 text-sm text-yellow-700">
+                        <p>Copy this secret now. It cannot be retrieved later.</p>
+                        <p className="mt-2 font-mono bg-yellow-100 p-2 rounded break-all">{webhookSecret}</p>
+                      </div>
+                      <div className="mt-4">
+                        <button type="button" onClick={() => setWebhookSecret(null)} className="text-sm font-medium text-yellow-800 hover:text-yellow-900 underline">Dismiss</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {workflow.workflow_triggers.length === 0 ? (
                 <p className="text-sm text-gray-500">No triggers defined. Workflow must be triggered manually.</p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-3">
                   {workflow.workflow_triggers.map((t: any) => (
-                    <li key={t.id} className="text-sm text-gray-700 bg-gray-50 p-2 rounded border border-gray-100">
-                      Type: <span className="font-mono font-medium">{t.type}</span>
+                    <li key={t.id} className="flex items-center justify-between text-sm text-gray-700 bg-gray-50 p-3 rounded border border-gray-200">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-medium capitalize">{t.type}</span>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${t.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {t.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500 font-mono">ID: {t.id}</p>
+                      </div>
+                      
+                      {!isViewer && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleToggleTrigger(t.id, t.enabled)}
+                            className="p-1 text-gray-500 hover:text-indigo-600 transition-colors"
+                            title={t.enabled ? "Disable" : "Enable"}
+                          >
+                            {t.enabled ? <ToggleRight className="h-5 w-5 text-indigo-600" /> : <ToggleLeft className="h-5 w-5" />}
+                          </button>
+                          
+                          {(activeRole === 'owner' || t.type !== 'webhook') && (
+                            <button
+                              onClick={() => handleDeleteTrigger(t.id)}
+                              className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

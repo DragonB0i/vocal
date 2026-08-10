@@ -1,9 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { Request, Response } from 'express';
-import { runWorkflowEngine } from './_shared/runner';
+import { executeGraphQL } from './_shared/runner';
+import crypto from 'crypto';
 
 export default async function handler(req: Request, res: Response) {
-  // CORS handling
+  // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -38,57 +39,35 @@ export default async function handler(req: Request, res: Response) {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 
-  // --- 1. AUTHORIZATION ---
-  // We query the workflow using the USER's token. This ensures they at least belong to the org.
-  const checkAccessQuery = `
-    query CheckWorkflowAccess($id: uuid!) {
-      workflows_by_pk(id: $id) {
-        id
-        org_id
-        organization {
-          org_members {
-            role
-            user_id
+  try {
+    // 1. Check access
+    const checkAccessQuery = `
+      query CheckWorkflowAccess($id: uuid!) {
+        workflows_by_pk(id: $id) {
+          id
+          org_id
+          organization {
+            org_members {
+              role
+              user_id
+            }
           }
         }
       }
-    }
-  `;
+    `;
 
-  try {
     const accessResponse = await fetch(graphqlUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authHeader
-      },
-      body: JSON.stringify({
-        query: checkAccessQuery,
-        variables: { id: workflowId }
-      })
+      headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+      body: JSON.stringify({ query: checkAccessQuery, variables: { id: workflowId } })
     });
 
     const accessData = await accessResponse.json();
-    
-    if (accessData.errors) {
-      console.error('GraphQL Error checking access:', accessData.errors);
-      return res.status(400).json({ error: 'Failed to verify workflow access' });
-    }
-
     const workflow = accessData.data?.workflows_by_pk;
     if (!workflow) {
       return res.status(403).json({ error: 'Workflow not found or access denied' });
     }
 
-    // Determine the user's role. Nhost JWT doesn't give us the precise user ID easily in an edge function without verifying JWT manually.
-    // However, the GraphQL query was executed under their identity. The `org_members` array returned 
-    // will ONLY contain their own membership if row-level security isolates it, or all memberships if they can see all.
-    // In Phase 2, users can read all org_members in their organization. So we need their user ID.
-    // We can fetch the user ID from the Hasura JWT endpoints or from Nhost Auth `/v1/auth/user`.
-    // An easier Hasura trick: `query { auth_users { id } }` might return their user ID if they have access to their own record.
-    // But let's verify via the auth endpoint or decode the JWT safely.
-    // Actually, we can just ask Hasura to return the current user's ID by calling a custom action or using `x-hasura-user-id`? 
-    // We can decode the JWT payload! The JWT is not encrypted, just base64 encoded.
     const token = authHeader.replace('Bearer ', '');
     const payloadBase64 = token.split('.')[1];
     if (!payloadBase64) throw new Error('Invalid token');
@@ -101,20 +80,50 @@ export default async function handler(req: Request, res: Response) {
     }
 
     const membership = workflow.organization.org_members.find((m: any) => m.user_id === userId);
-    if (!membership || (membership.role !== 'owner' && membership.role !== 'editor')) {
-      return res.status(403).json({ error: 'Execution denied: Requires owner or editor role in this organization.' });
+    if (!membership || membership.role !== 'owner') {
+      return res.status(403).json({ error: 'Requires owner role to create a webhook trigger' });
     }
 
-    // --- 2. EXECUTE WORKFLOW ---
-    const { runId, status } = await runWorkflowEngine(
-      graphqlUrl,
-      adminSecret,
-      workflowId,
-      workflow.org_id,
-      userId
-    );
+    // 2. Generate secret and hash
+    const plaintextSecret = 'whsec_' + crypto.randomBytes(32).toString('hex');
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derivedKey = crypto.scryptSync(plaintextSecret, salt, 64);
+    const secretHash = `${salt}:${derivedKey.toString('base64')}`;
 
-    return res.status(200).json({ runId, status });
+    // 3. Create Trigger
+    const insertQuery = `
+      mutation CreateWebhook($workflowId: uuid!, $secretHash: String!, $orgId: uuid!, $userId: uuid!) {
+        insert_workflow_triggers_one(object: {
+          workflow_id: $workflowId,
+          type: "webhook",
+          secret_hash: $secretHash,
+          enabled: true
+        }) {
+          id
+        }
+        insert_audit_logs_one(object: {
+          org_id: $orgId,
+          user_id: $userId,
+          action: "webhook_trigger_created",
+          entity_type: "workflow_trigger",
+          entity_id: $workflowId
+        }) {
+          id
+        }
+      }
+    `;
+
+    const insertData = await executeGraphQL(graphqlUrl, adminSecret, insertQuery, {
+      workflowId,
+      secretHash,
+      orgId: workflow.org_id,
+      userId
+    });
+
+    const triggerId = insertData.insert_workflow_triggers_one.id;
+
+    // Return the plaintext secret EXACTLY ONCE
+    return res.status(200).json({ triggerId, secret: plaintextSecret });
 
   } catch (error: any) {
     console.error('Unhandled execution error:', error);
