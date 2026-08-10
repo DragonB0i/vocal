@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useOrganization } from '@/components/layout/OrganizationContext';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/graphql';
-import { Loader2, AlertCircle, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, XCircle, ArrowLeft, Play } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
@@ -18,11 +18,11 @@ const GET_WORKFLOW = `
       description
       status
       created_at
-      workflow_steps(order_by: {step_order: asc}) {
+      workflow_steps(order_by: {position: asc}) {
         id
         name
         type
-        step_order
+        position
       }
       workflow_triggers {
         id
@@ -58,6 +58,9 @@ export default function WorkflowDetailPage() {
     id ? [GET_WORKFLOW, { id }] : null,
     ([query, variables]) => fetcher(query, variables)
   );
+
+  const [isRunning, setIsRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const [isAddStepOpen, setIsAddStepOpen] = useState(false);
   const [newStepName, setNewStepName] = useState('');
@@ -117,6 +120,27 @@ export default function WorkflowDetailPage() {
 
   const workflow = data.workflows_by_pk;
 
+  const handleRunWorkflow = async () => {
+    setIsRunning(true);
+    setRunError(null);
+    try {
+      const nhost = (window as any).__NHOST_CLIENT__;
+      if (!nhost) throw new Error('Nhost client not found');
+      
+      const { res, error } = await nhost.functions.call('execute-workflow', { workflowId: id });
+      
+      if (error) {
+        throw new Error(error.message || 'Execution failed');
+      }
+      
+      mutate();
+    } catch (err: any) {
+      setRunError(err.message || 'Failed to execute workflow.');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="mb-4">
@@ -125,20 +149,46 @@ export default function WorkflowDetailPage() {
         </Link>
       </div>
 
+      {runError && (
+        <div className="rounded-md bg-red-50 p-4">
+          <div className="flex">
+            <AlertCircle className="h-5 w-5 text-red-400" />
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">Execution Error</h3>
+              <p className="mt-1 text-sm text-red-700">{runError}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white px-4 py-5 shadow sm:rounded-lg sm:px-6">
-        <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
-          {workflow.name}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
-          {workflow.description || 'No description'}
-        </p>
-        <div className="mt-4 flex items-center gap-2">
-          <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
-            workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-gray-50 text-gray-600 ring-gray-500/10'
-          }`}>
-            {workflow.status}
-          </span>
-          <span className="text-xs text-gray-400">ID: {workflow.id}</span>
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
+              {workflow.name}
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-500">
+              {workflow.description || 'No description'}
+            </p>
+            <div className="mt-4 flex items-center gap-2">
+              <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
+                workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-gray-50 text-gray-600 ring-gray-500/10'
+              }`}>
+                {workflow.status}
+              </span>
+              <span className="text-xs text-gray-400">ID: {workflow.id}</span>
+            </div>
+          </div>
+          {!isViewer && (
+            <button
+              onClick={handleRunWorkflow}
+              disabled={isRunning}
+              className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+            >
+              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {isRunning ? 'Running...' : 'Run Workflow'}
+            </button>
+          )}
         </div>
       </div>
 
