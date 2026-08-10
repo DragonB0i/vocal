@@ -1,0 +1,23 @@
+# Nhost configuration file
+# This file is used to configure your Nhost project.
+
+[global]
+environment = ["NEXT_PUBLIC_NHOST_SUBDOMAIN", "NEXT_PUBLIC_NHOST_REGION"]
+
+[auth]
+[auth.session]
+accessToken.expiresIn = 900
+refreshToken.expiresIn = 43200
+
+[auth.method.email-password]
+active = true
+
+[postgres]
+version = "14.6-20230215-1"
+
+[hasura]
+version = "v2.24.0"
+
+[functions]
+[functions.node]
+version = 18
