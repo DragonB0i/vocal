@@ -69,6 +69,27 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
     );
   }
 
+  if (memberships.length === 0) {
+    return (
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-gray-50 p-6">
+        <div className="mx-auto max-w-md text-center">
+          <h2 className="mt-2 text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">No Organizations Found</h2>
+          <p className="mt-4 text-sm text-gray-500">
+            You are not a member of any organization. Please contact your administrator to be invited to a workspace, or check back later.
+          </p>
+          <div className="mt-6">
+            <button
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <OrgContext.Provider value={{
       memberships,

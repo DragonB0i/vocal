@@ -198,9 +198,11 @@ export default function WorkflowsPage() {
                       <div className="mt-4 flex-shrink-0 sm:ml-5 sm:mt-0">
                         <div className="flex flex-col items-end gap-2">
                           <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset ${
-                            workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-gray-50 text-gray-600 ring-gray-500/10'
+                            workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
+                            workflow.status === 'disabled' ? 'bg-red-50 text-red-700 ring-red-600/10' : 
+                            'bg-gray-50 text-gray-600 ring-gray-500/10'
                           }`}>
-                            {workflow.status}
+                            {workflow.status.toUpperCase()}
                           </span>
                           <p className="text-xs text-gray-400">Created {new Date(workflow.created_at).toLocaleDateString()}</p>
                         </div>
