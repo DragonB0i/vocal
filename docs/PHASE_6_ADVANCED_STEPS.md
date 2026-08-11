@@ -48,14 +48,14 @@ Pauses execution until an authorized user approves it.
 
 ### 2.3 LLM Call (`llm_call`)
 Executes an LLM completion request.
-- **Provider:** OpenAI (via `https://api.openai.com/v1/chat/completions`).
-- **Authentication:** Must be provided via `OPENAI_API_KEY` on the backend environment. If missing, it fails safely rather than faking success. Keys are NEVER exposed to the frontend or workflow config.
+- **Provider:** Groq (via `https://api.groq.com/v1/chat/completions`).
+- **Authentication:** Must be provided via `GROQ_API_KEY` on the backend environment. If missing, it fails safely rather than faking success. Keys are NEVER exposed to the frontend or workflow config.
 - **Security:** Strict 10,000 character prompt limits and forced token limits prevent resource abuse.
 
 **Configuration:**
 ```json
 {
-  "provider": "openai",
+  "provider": "groq",
   "model": "gpt-3.5-turbo",
   "prompt": "Summarize this: {{ steps.Fetch.output.body }}",
   "temperature": 0.2

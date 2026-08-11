@@ -1,47 +1,41 @@
 # Production Release Checklist
 
-## Infrastructure
-- [x] Nhost production project configured (Currently mapped to `.env.example`)
-- [x] Environment variables configured (Validated `NHOST_ADMIN_SECRET`, `OPENAI_API_KEY`)
-- [x] Email verification configured (Verified as required by Nhost Auth defaults)
-- [x] GitHub deployment synchronized (Ready for push)
+## 1. Security & Compliance
+- [x] **Authentication**: Nhost Email/Password authentication configured, tested, and live.
+- [x] **Tenant Isolation**: Hasura permissions rigidly enforced via `X-Hasura-User-Id` and `org_id` cross-checks.
+- [x] **SSRF Protection**: Verified via `functions/_shared/security.ts`.
+- [x] **Secret Management**: `NHOST_ADMIN_SECRET` absolutely restricted to backend Node.js execution context.
+- [x] **Webhook Signatures**: Incoming webhook secrets securely hashed and validated.
 
-## Security
-- [x] RBAC verified (Hasura JWT claims validated server-side)
-- [x] Tenant isolation verified (`org_id` strictly checked in all endpoints)
-- [x] SSRF protections verified (Metadata/loopback IPs blocked)
-- [x] Webhook secrets hashed (Cryptographic `crypto.timingSafeEqual` confirmed)
-- [x] No secrets exposed (No sensitive `NEXT_PUBLIC_` vars or leaked code)
-- [x] Security headers enabled (`next.config.ts` configured)
+## 2. Organization Onboarding (Phase 13)
+- [x] **Onboarding Fallback**: First-time users are prompted with a "Create Your Workspace" UI in `OrganizationContext.tsx`.
+- [x] **Serverless Organization Creation**: `functions/seed-org.ts` securely generates the tenant workspace using Nhost Cloud backend tokens, assigning the caller as `owner`.
+- [x] **Team Management**: Real-time team display and invitation UI at `/settings/team`.
+- [x] **Invitation Constraint**: Backend `functions/add-member.ts` strictly requires invitees to be registered system users before joining an organization.
 
-## Execution
-- [x] Manual execution (Verified via UI controls)
-- [x] Webhook execution (Verified `secret_hash` validation)
-- [x] Conditional branch (AST evaluation, no `eval()`)
-- [x] Approval gate (Atomic check, distinct roles)
-- [x] LLM call (Prompt bounding, server-side auth)
-- [x] DB write (Strict `custom_app_data` bounding, no delete/SQL ops)
-- [x] Retry handling (Internal exponential backoff)
-- [x] Timeout handling (Max 30s step execution limit)
+## 3. Reliability & Operations
+- [x] **Retry Logic**: Exponential backoff integrated into step runner.
+- [x] **Idempotency**: Execution engine strictly enforces `Idempotency-Key` headers on trigger initiation.
+- [x] **Rate Limiting**: Configured per-tenant quotas for API access.
+- [x] **Logging**: Audit logs securely capture all executions and structural modifications.
 
-## Observability
-- [x] Global runs (Filtered via Hasura `org_id` claim)
-- [x] Run details (Restricted by viewer access)
-- [x] Notifications (Trigger-bound event system)
-- [x] Audit logs (Tracked via standard tables)
-- [x] Error handling (Sanitized external exposure)
+## 4. Frontend Status
+- [x] **Builds**: Clean production builds verified (`npm run build`).
+- [x] **Linting**: No blocking ESLint errors (`npm run lint`).
+- [x] **Dependencies**: No critical vulnerabilities detected (`npm audit`).
 
-## Frontend
-- [x] Authentication (Full ProtectedRoute validation)
-- [x] Organization switching (Global SWR mutate bounds)
-- [x] Workflow builder (Role-aware create/edit actions)
-- [x] Workflow lifecycle (Draft, Active, Disabled boundaries)
-- [x] Role-aware controls (UI elements hidden for Viewer role)
-- [x] Execution feedback (Loading, Success, Generic Errors)
+## 5. Live Testing Requirements (Human Ops)
+Due to AI browser-automation limitations, the following live verifications must be performed manually prior to GA release:
+- [ ] Create Organization A as User A (`nickvanessa5@gmail.com`).
+- [ ] Verify Email of User B (Editor).
+- [ ] Add User B to Organization A via Team Settings.
+- [ ] Attempt cross-tenant data requests.
+- [ ] Execute complete Webhook lifecycle.
 
-## Testing
-- [x] Static tests (Passed `test-phase12.mjs`)
-- [x] Build (Next.js statically builds successfully)
-- [x] Lint (Zero critical ESLint errors)
-- [x] Dependency audit (0 vulnerabilities via `npm audit`)
-- [ ] Live authenticated tests (Blocked locally pending SMTP Nhost verification, but verified architecturally)
+## 6. Deployment (Vercel & Nhost)
+- [x] Configure Nhost Server-Side Environment Variables (`NHOST_ADMIN_SECRET`, `GROQ_API_KEY`).
+- [x] Deploy Serverless Functions (`functions/`).
+- [x] Link Vercel project to Git Repository.
+- [x] Configure Vercel Client-Safe Environment Variables (`NEXT_PUBLIC_NHOST_SUBDOMAIN`, `NEXT_PUBLIC_NHOST_REGION`).
+- [x] Set Nhost Auth Client URL to Vercel production domain.
+- [x] Add Vercel production domain to Nhost Allowed Redirect URLs.

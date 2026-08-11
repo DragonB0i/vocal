@@ -49,8 +49,8 @@ const allFrontendFiles = filesToExist.filter(f => f.startsWith('src/') || f.star
 const allContents = allFrontendFiles.map(f => fs.readFileSync(f, 'utf8'));
 const hasAdminSecret = allContents.some(content => content.includes('NHOST_ADMIN_SECRET'));
 assert(!hasAdminSecret, "NHOST_ADMIN_SECRET is not exposed in frontend code.");
-const hasOpenAIKey = allContents.some(content => content.includes('OPENAI_API_KEY'));
-assert(!hasOpenAIKey, "OPENAI_API_KEY is not exposed in frontend code.");
+const hasOpenAIKey = allContents.some(content => content.includes('GROQ_API_KEY'));
+assert(!hasOpenAIKey, "GROQ_API_KEY is not exposed in frontend code.");
 const hasEval = allContents.some(content => content.includes('eval(') || content.includes('new Function('));
 assert(!hasEval, "No eval() or new Function() in frontend code.");
 const hasRawSQL = allContents.some(content => content.includes('SELECT ') && content.includes(' FROM '));

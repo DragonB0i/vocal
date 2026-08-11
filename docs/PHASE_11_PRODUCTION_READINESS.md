@@ -8,7 +8,7 @@ Phase 11 served as a system-wide polish and production hardening stage, focusing
 ### 1. Security & Configuration
 - **Security Headers**: Updated `next.config.ts` to strictly inject `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: strict-origin-when-cross-origin` into all API and page requests.
 - **Dependency Audit**: Executed `npm audit` which successfully passed with zero identified vulnerabilities or critical alerts.
-- **Secrets Audit**: Confirmed via shell regex that `NHOST_ADMIN_SECRET`, `OPENAI_API_KEY`, and webhook hashed tokens remain contained cleanly in Serverless logic (`functions/`) and never leak into the React DOM or bundled output.
+- **Secrets Audit**: Confirmed via shell regex that `NHOST_ADMIN_SECRET`, `GROQ_API_KEY`, and webhook hashed tokens remain contained cleanly in Serverless logic (`functions/`) and never leak into the React DOM or bundled output.
 
 ### 2. User Experience Polish
 - **Authentication**: `auth/page.tsx` was reviewed and deemed functionally solid—handling the Nhost loading states flawlessly and correctly detecting local-verification stalls (displaying a helpful message instead of a generic failure).

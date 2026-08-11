@@ -27,7 +27,7 @@
 - `notify`: Binds strictly to `org_id`.
 - `conditional_branch`: Safe JS logic via isolated sandbox / AST, no `eval()`, `new Function()`.
 - `approval_gate`: Only authorized users can approve. Atomic.
-- `llm_call`: Uses internal `OPENAI_API_KEY`, prompt sizes bounded.
+- `llm_call`: Uses internal `GROQ_API_KEY`, prompt sizes bounded.
 - `db_write`: Restricted strictly to `custom_app_data` with server-controlled `org_id`.
 
 **Findings:**

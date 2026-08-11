@@ -5,9 +5,13 @@ export default async function addMember(req: Request, res: Response) {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  const { orgId, userId, role } = req.body;
-  if (!orgId || !userId || !role) {
+  const { orgId, email, role } = req.body;
+  if (!orgId || !email || !role) {
     return res.status(400).json({ message: 'Missing required fields' });
+  }
+
+  if (role !== 'editor' && role !== 'viewer') {
+    return res.status(400).json({ message: 'Invalid role. Must be editor or viewer.' });
   }
 
   const authHeader = req.headers.authorization;
@@ -53,7 +57,29 @@ export default async function addMember(req: Request, res: Response) {
       return res.status(403).json({ message: 'Forbidden: Caller is not an owner of this organization' });
     }
 
-    // 3. Add the member
+    // 3. Find the target user by email
+    const findUserQuery = `
+      query FindUserByEmail($email: citext!) {
+        users(where: {email: {_eq: $email}}) {
+          id
+        }
+      }
+    `;
+    const findUserRes = await fetch(graphqlEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-hasura-admin-secret': adminSecret as string },
+      body: JSON.stringify({ query: findUserQuery, variables: { email } })
+    });
+    const findUserData = await findUserRes.json();
+    if (findUserData.errors) {
+      return res.status(500).json({ message: 'Error querying users' });
+    }
+    if (!findUserData.data?.users?.length) {
+      return res.status(404).json({ message: 'User must sign up and verify their account first.' });
+    }
+    const targetUserId = findUserData.data.users[0].id;
+
+    // 4. Add the member
     const insertQuery = `
       mutation AddMember($orgId: uuid!, $userId: uuid!, $role: String!) {
         insert_org_members_one(object: {
@@ -68,11 +94,14 @@ export default async function addMember(req: Request, res: Response) {
     const insertRes = await fetch(graphqlEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-hasura-admin-secret': adminSecret as string },
-      body: JSON.stringify({ query: insertQuery, variables: { orgId, userId, role } })
+      body: JSON.stringify({ query: insertQuery, variables: { orgId, userId: targetUserId, role } })
     });
 
     const result = await insertRes.json();
     if (result.errors) {
+      if (result.errors[0]?.message?.includes('Uniqueness violation')) {
+        return res.status(400).json({ message: 'User is already a member of this organization.' });
+      }
       return res.status(400).json({ errors: result.errors });
     }
 

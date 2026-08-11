@@ -299,21 +299,21 @@ export async function runWorkflowEngine(
           isPaused = true;
         } else if (step.type === 'llm_call') {
           const config = interpolateConfig(step.config, executionContext);
-          if (config.provider === 'openai') {
-            const apiKey = process.env.OPENAI_API_KEY;
-            if (!apiKey) throw new Error('OPENAI_API_KEY environment variable is not set');
+          if (config.provider === 'groq') {
+            const apiKey = process.env.GROQ_API_KEY;
+            if (!apiKey) throw new Error('GROQ_API_KEY environment variable is not set');
 
             const prompt = String(config.prompt || '').substring(0, 10000);
             
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 15000);
 
-            const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            const openaiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
               signal: controller.signal,
               body: JSON.stringify({
-                model: config.model || 'gpt-3.5-turbo',
+                model: config.model || 'llama3-8b-8192',
                 messages: [{ role: 'user', content: prompt }],
                 temperature: Number(config.temperature) || 0.2,
                 max_tokens: 2000
@@ -322,7 +322,7 @@ export async function runWorkflowEngine(
             clearTimeout(timeout);
             const data: any = await openaiRes.json();
             if (!openaiRes.ok) {
-               const err: any = new Error(`OpenAI API error: ${data.error?.message || 'Unknown'}`);
+               const err: any = new Error(`Groq API error: ${data.error?.message || 'Unknown'}`);
                err.status = openaiRes.status;
                throw err;
             }

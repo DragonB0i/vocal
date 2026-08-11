@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useSignInEmailPassword, useSignUpEmailPassword } from '@nhost/nextjs';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { nhost } from '@/lib/nhost';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -30,11 +31,7 @@ export default function AuthPage() {
     } else {
       const { isSuccess, isError } = await signUpEmailPassword(email, password);
       if (isSuccess && !isError) {
-        // useSignUpEmailPassword does not return session directly in this version
-        // if verification is disabled, user is logged in automatically and nhost handles session.
-        // if verification is enabled, user is not logged in.
-        // We can check nhost client directly.
-        const session = (window as any).__NHOST_CLIENT__?.auth.getSession() || null;
+        const session = nhost.auth.getSession();
         if (!session) {
           setNeedsVerification(true);
         } else {

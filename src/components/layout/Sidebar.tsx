@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, List, Play, Activity, Bell } from 'lucide-react';
+import { Home, List, Play, Activity, Bell, Users } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Workflows', href: '/workflows', icon: List },
   { name: 'Global Runs', href: '/runs', icon: Activity },
   { name: 'Notifications', href: '/notifications', icon: Bell },
+  { name: 'Team', href: '/settings/team', icon: Users },
 ];
 
 export function Sidebar() {

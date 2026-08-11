@@ -424,13 +424,13 @@ export default function WorkflowDetailPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-gray-700">Provider</label>
-              <select required value={config.provider || 'openai'} onChange={e => handleConfigChange(setConfig, config, 'provider', e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white focus:ring-indigo-500 focus:border-indigo-500">
-                <option value="openai">OpenAI</option>
+              <select required value={config.provider || 'groq'} onChange={e => handleConfigChange(setConfig, config, 'provider', e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border bg-white focus:ring-indigo-500 focus:border-indigo-500">
+                <option value="groq">Groq</option>
               </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700">Model</label>
-              <input type="text" value={config.model || 'gpt-3.5-turbo'} onChange={e => handleConfigChange(setConfig, config, 'model', e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border focus:ring-indigo-500 focus:border-indigo-500" />
+              <input type="text" value={config.model || 'llama3-8b-8192'} onChange={e => handleConfigChange(setConfig, config, 'model', e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border focus:ring-indigo-500 focus:border-indigo-500" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700">Prompt (Supports {'{{ interpolation }}'})</label>
@@ -485,7 +485,7 @@ export default function WorkflowDetailPage() {
     switch (type) {
       case 'http_request': return <span className="text-gray-600 truncate"><strong className="text-gray-900">{config.method || 'GET'}</strong> {config.url || 'No URL'}</span>;
       case 'conditional_branch': return <span className="text-gray-600 truncate">If <strong className="text-gray-900">{config.condition?.field}</strong> {config.condition?.operator} {config.condition?.value}</span>;
-      case 'llm_call': return <span className="text-gray-600 truncate">Prompt via <strong className="text-gray-900">{config.provider || 'openai'}</strong></span>;
+      case 'llm_call': return <span className="text-gray-600 truncate">Prompt via <strong className="text-gray-900">{config.provider || 'groq'}</strong></span>;
       case 'db_write': return <span className="text-gray-600 truncate"><strong className="text-gray-900">{config.operation?.toUpperCase()}</strong> to {config.table}</span>;
       case 'notify': return <span className="text-gray-600 truncate">Send notification</span>;
       case 'approval_gate': return <span className="text-gray-600 truncate">Requires human review</span>;
