@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { executeGraphQL } from './_shared/runner';
 import { checkRateLimit, getAuthenticatedUserId } from './_shared/security';
 import crypto from 'crypto';
+import { handleCors } from './_shared/cors';
 
 export default async function handler(req: Request, res: Response) {
   if (handleCors(req, res)) return;
