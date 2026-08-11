@@ -2,20 +2,10 @@
 import { Request, Response } from 'express';
 import { runWorkflowEngine } from './_shared/runner';
 import { checkRateLimit, checkIdempotency, getAuthenticatedUserId } from './_shared/security';
+import { handleCors } from './_shared/cors';
 
 export default async function handler(req: Request, res: Response) {
-  // CORS handling
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
-  );
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (handleCors(req, res)) return;
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });

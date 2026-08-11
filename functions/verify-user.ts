@@ -8,7 +8,7 @@ export default async function verifyUser(req: Request, res: Response) {
   const { userId } = req.body;
 
   const adminSecret = process.env.NHOST_ADMIN_SECRET;
-  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${process.env.NHOST_SUBDOMAIN}.graphql.${process.env.NHOST_REGION}.nhost.run/v1/graphql`;
+  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${process.env.NHOST_SUBDOMAIN}.graphql.${process.env.NHOST_REGION}.nhost.run/v1`;
 
   const query = `
     mutation VerifyEmail($userId: uuid!) {

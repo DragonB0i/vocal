@@ -2,8 +2,11 @@
 import { Request, Response } from 'express';
 import { runWorkflowEngine, executeGraphQL } from './_shared/runner';
 import { checkRateLimit, getAuthenticatedUserId } from './_shared/security';
+import { handleCors } from './_shared/cors';
 
 export default async function handleApproveStep(req: Request, res: Response) {
+  if (handleCors(req, res)) return;
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }

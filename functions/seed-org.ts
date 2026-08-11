@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
+import { handleCors } from './_shared/cors';
 
 export default async function seedOrg(req: Request, res: Response) {
+  if (handleCors(req, res)) return;
+
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
@@ -18,7 +21,7 @@ export default async function seedOrg(req: Request, res: Response) {
   const subdomain = process.env.NHOST_SUBDOMAIN;
   const region = process.env.NHOST_REGION;
   const adminSecret = process.env.NHOST_ADMIN_SECRET;
-  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${subdomain}.graphql.${region}.nhost.run/v1/graphql`;
+  const graphqlEndpoint = process.env.NHOST_GRAPHQL_URL || `https://${subdomain}.graphql.${region}.nhost.run/v1`;
   const authEndpoint = `https://${subdomain}.auth.${region}.nhost.run/v1/user`;
 
   try {

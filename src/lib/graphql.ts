@@ -3,9 +3,7 @@ import { GraphQLClient } from 'graphql-request';
 import { nhost } from './nhost';
 
 export function getGraphqlEndpoint() {
-  const subdomain = process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN || 'local';
-  const region = process.env.NEXT_PUBLIC_NHOST_REGION || '';
-  return `https://${subdomain}.graphql.${region}.nhost.run/v1/graphql`;
+  return nhost.graphql.httpUrl;
 }
 
 export function getGraphqlClient() {
