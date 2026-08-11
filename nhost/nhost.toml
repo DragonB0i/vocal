@@ -1,7 +1,7 @@
 [global]
 
 [hasura]
-version = 'v2.46.0-ce'
+version = 'v2.48.10-ce'
 adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 webhookSecret = '{{ secrets.NHOST_WEBHOOK_SECRET }}'
 
@@ -28,7 +28,7 @@ httpPoolSize = 100
 version = 22
 
 [auth]
-version = '0.38.1'
+version = '0.49.1'
 
 [auth.elevatedPrivileges]
 mode = 'disabled'
