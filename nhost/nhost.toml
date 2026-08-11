@@ -34,7 +34,7 @@ version = '0.38.1'
 mode = 'disabled'
 
 [auth.redirections]
-clientUrl = 'http://localhost:3000'
+clientUrl = 'https://vocal-mxzo.vercel.app'
 
 [auth.signUp]
 enabled = true
