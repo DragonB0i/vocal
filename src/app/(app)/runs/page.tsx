@@ -162,7 +162,7 @@ export default function GlobalRunsPage() {
                     </div>
                   </div>
                   <Link 
-                    href={`/workflows/${run.workflow.id}`}
+                    href={`/runs/${run.id}`}
                     className="hidden sm:block text-xs font-medium text-gray-500 bg-white border border-gray-300 rounded px-2 py-1 shadow-sm hover:bg-gray-50"
                   >
                     View Details

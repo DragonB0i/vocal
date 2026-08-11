@@ -72,6 +72,7 @@ export default async function handler(req: Request, res: Response) {
           secret_hash
           workflow {
             org_id
+            status
           }
         }
       }
@@ -84,6 +85,10 @@ export default async function handler(req: Request, res: Response) {
     if (!trigger || trigger.type !== 'webhook' || !trigger.enabled) {
       // Return 401 instead of 404 to avoid leaking existence, or return 401 if secret invalid.
       return res.status(401).json({ error: 'Unauthorized or invalid trigger' });
+    }
+
+    if (trigger.workflow.status !== 'active') {
+      return res.status(403).json({ error: `Cannot execute workflow because it is ${trigger.workflow.status}` });
     }
 
     // 3. Verify Secret

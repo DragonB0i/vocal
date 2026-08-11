@@ -62,6 +62,7 @@ export default async function handler(req: Request, res: Response) {
       workflows_by_pk(id: $id) {
         id
         org_id
+        status
         organization {
           org_members {
             role
@@ -95,6 +96,10 @@ export default async function handler(req: Request, res: Response) {
     const workflow = accessData.data?.workflows_by_pk;
     if (!workflow) {
       return res.status(403).json({ error: 'Workflow not found or access denied' });
+    }
+
+    if (workflow.status !== 'active') {
+      return res.status(403).json({ error: `Cannot execute workflow because it is ${workflow.status}` });
     }
 
     const membership = workflow.organization.org_members.find((m: any) => m.user_id === userId);

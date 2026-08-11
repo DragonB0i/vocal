@@ -65,6 +65,15 @@ const ADD_STEP = `
   }
 `;
 
+const UPDATE_WORKFLOW_STATUS = `
+  mutation UpdateWorkflowStatus($id: uuid!, $status: String!) {
+    update_workflows_by_pk(pk_columns: {id: $id}, _set: {status: $status}) {
+      id
+      status
+    }
+  }
+`;
+
 const DELETE_TRIGGER = `
   mutation DeleteTrigger($id: uuid!) {
     delete_workflow_triggers_by_pk(id: $id) {
@@ -214,6 +223,17 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  const handleToggleWorkflowStatus = async (currentStatus: string) => {
+    if (isViewer) return;
+    const newStatus = currentStatus === 'active' ? 'disabled' : 'active';
+    try {
+      await fetcher(UPDATE_WORKFLOW_STATUS, { id, status: newStatus });
+      mutate();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update workflow status');
+    }
+  };
+
   if (isOrgLoading || (isLoading && !error)) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -273,7 +293,9 @@ export default function WorkflowDetailPage() {
             </p>
             <div className="mt-4 flex items-center gap-2">
               <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
-                workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 'bg-gray-50 text-gray-600 ring-gray-500/10'
+                workflow.status === 'active' ? 'bg-green-50 text-green-700 ring-green-600/20' : 
+                workflow.status === 'disabled' ? 'bg-red-50 text-red-700 ring-red-600/10' : 
+                'bg-gray-50 text-gray-600 ring-gray-500/10'
               }`}>
                 {workflow.status}
               </span>
@@ -281,14 +303,25 @@ export default function WorkflowDetailPage() {
             </div>
           </div>
           {!isViewer && (
-            <button
-              onClick={handleRunWorkflow}
-              disabled={isRunning}
-              className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
-            >
-              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {isRunning ? 'Running...' : 'Run Workflow'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => handleToggleWorkflowStatus(workflow.status)}
+                className="inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+              >
+                {workflow.status === 'active' ? <ToggleRight className="h-5 w-5 text-indigo-600" /> : <ToggleLeft className="h-5 w-5 text-gray-400" />}
+                {workflow.status === 'active' ? 'Active' : 'Disabled'}
+              </button>
+              
+              <button
+                onClick={handleRunWorkflow}
+                disabled={isRunning || workflow.status !== 'active'}
+                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                title={workflow.status !== 'active' ? 'Workflow must be active to run' : ''}
+              >
+                {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {isRunning ? 'Running...' : 'Run Workflow'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -547,8 +580,9 @@ export default function WorkflowDetailPage() {
           </div>
 
           <div className="bg-white shadow sm:rounded-lg overflow-hidden">
-            <div className="border-b border-gray-200 px-4 py-5 sm:px-6">
+            <div className="border-b border-gray-200 px-4 py-5 sm:px-6 flex justify-between items-center">
               <h3 className="text-base font-semibold leading-6 text-gray-900">Recent Runs</h3>
+              <Link href={`/runs?workflow=${workflow.id}`} className="text-sm text-indigo-600 hover:text-indigo-900 font-medium">View all</Link>
             </div>
             <div className="px-4 py-5 sm:p-6">
               <ul className="divide-y divide-gray-100 space-y-4">
@@ -565,14 +599,17 @@ export default function WorkflowDetailPage() {
                            <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />}
                           <span className="ml-3 text-sm font-medium text-gray-900 capitalize">{run.status}</span>
                         </div>
-                        <span className="text-xs text-gray-500">
-                          {new Date(run.started_at).toLocaleString()}
-                          {run.completed_at && (
-                            <span className="ml-2 bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                              {Math.round((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s
-                            </span>
-                          )}
-                        </span>
+                        <div className="flex items-center gap-4">
+                          <span className="text-xs text-gray-500">
+                            {new Date(run.started_at).toLocaleString()}
+                            {run.completed_at && (
+                              <span className="ml-2 bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                                {Math.round((new Date(run.completed_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s
+                              </span>
+                            )}
+                          </span>
+                          <Link href={`/runs/${run.id}`} className="text-xs text-indigo-600 hover:text-indigo-900 border border-gray-200 rounded px-2 py-1 bg-white shadow-sm">Details</Link>
+                        </div>
                       </div>
                       
                       <div className="mt-3 pl-8">
