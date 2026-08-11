@@ -5,7 +5,6 @@ version = 'v2.46.0-ce'
 adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 webhookSecret = '{{ secrets.NHOST_WEBHOOK_SECRET }}'
 
-
 [hasura.settings]
 corsDomain = ['*']
 devMode = true
@@ -24,6 +23,7 @@ level = 'warn'
 httpPoolSize = 100
 
 [functions]
+
 [functions.node]
 version = 22
 
@@ -41,6 +41,7 @@ enabled = true
 disableNewUsers = false
 
 [auth.user]
+
 [auth.user.roles]
 default = 'user'
 allowed = ['user', 'me']
@@ -59,6 +60,7 @@ rating = 'g'
 [auth.user.emailDomains]
 
 [auth.session]
+
 [auth.session.accessToken]
 expiresIn = 900
 
@@ -66,6 +68,7 @@ expiresIn = 900
 expiresIn = 2592000
 
 [auth.method]
+
 [auth.method.anonymous]
 enabled = false
 
@@ -73,6 +76,7 @@ enabled = false
 enabled = false
 
 [auth.method.otp]
+
 [auth.method.otp.email]
 enabled = false
 
@@ -85,6 +89,7 @@ passwordMinLength = 9
 enabled = false
 
 [auth.method.oauth]
+
 [auth.method.oauth.apple]
 enabled = false
 
@@ -148,6 +153,7 @@ enabled = false
 concealErrors = false
 
 [auth.rateLimit]
+
 [auth.rateLimit.emails]
 limit = 10
 interval = '1h'
@@ -172,6 +178,7 @@ interval = '1m'
 version = '14.18-20250728-1'
 
 [postgres.resources]
+
 [postgres.resources.storage]
 capacity = 1
 
@@ -181,6 +188,7 @@ capacity = 1
 version = '0.7.2'
 
 [observability]
+
 [observability.grafana]
 adminPassword = '{{ secrets.GRAFANA_ADMIN_PASSWORD }}'
 
